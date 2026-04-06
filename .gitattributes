@@ -1,0 +1,19 @@
+# Auto-detect binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Text files
+*.md text
+*.json text
+*.ts text
+*.js text
+*.css text
+*.html text
+
+# Executables
+*.exe binary
+*.exe filter=lfs diff=lfs merge=lfs -text

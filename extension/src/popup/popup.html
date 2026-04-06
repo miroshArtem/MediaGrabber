@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediaGrabber</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>MediaGrabber</h1>
+    </header>
+    
+    <div id="no-video" class="message">
+      No video detected on this page
+    </div>
+    
+    <div id="video-list" class="hidden">
+      <h2>Available Videos</h2>
+      <div id="videos"></div>
+    </div>
+    
+    <div id="download-progress" class="hidden">
+      <h2>Downloading...</h2>
+      <div class="progress-bar">
+        <div id="progress-fill"></div>
+      </div>
+      <span id="progress-text">0%</span>
+    </div>
+    
+    <div id="error" class="hidden error">
+      <span id="error-message"></span>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

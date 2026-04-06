@@ -1,0 +1,21 @@
+{
+  "name": "mediagrabber-coapp",
+  "version": "1.0.0",
+  "description": "Companion app for MediaGrabber extension",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/main.js",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "@types/node": "^22.0.0"
+  },
+  "dependencies": {
+    "got": "^12.6.0",
+    "tmp": "^0.2.0",
+    "yargs": "^18.0.0"
+  }
+}

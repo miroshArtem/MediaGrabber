@@ -39,3 +39,17 @@ coverage/
 *.zip
 *.crx
 *.xpi
+
+# FFmpeg binaries (downloaded separately)
+coapp/ffmpeg/**/ffmpeg.exe
+coapp/ffmpeg/**/ffmpeg
+!coapp/ffmpeg/**/.gitkeep
+
+# Compiled extension JS (generated from TypeScript)
+extension/src/*.js
+extension/src/*.js.map
+extension/src/popup/*.js
+extension/src/lib/*.js
+
+# CoApp compiled JS
+coapp/dist/
