@@ -7,31 +7,81 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>MediaGrabber</h1>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <h1 class="popup-title">MediaGrabber</h1>
+      <button id="settings-btn" class="icon-btn" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
     </header>
     
-    <div id="no-video" class="message">
-      No video detected on this page
+    <!-- Status Bar -->
+    <div id="status-bar" class="status-bar">
+      <span id="status-text">Checking for media...</span>
     </div>
     
-    <div id="video-list" class="hidden">
-      <h2>Available Videos</h2>
+    <!-- Empty State -->
+    <div id="empty-state" class="empty-state">
+      <svg class="empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+      </svg>
+      <p>No media detected on this page</p>
+      <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
+    </div>
+    
+    <!-- Media List -->
+    <div id="video-list" class="media-list hidden">
       <div id="videos"></div>
     </div>
     
-    <div id="download-progress" class="hidden">
-      <h2>Downloading...</h2>
+    <!-- Selected Media Details -->
+    <div id="media-details" class="media-details hidden">
+      <h2 id="media-title">Video Title</h2>
+      <div id="quality-list" class="quality-list"></div>
+    </div>
+    
+    <!-- Download Section -->
+    <div id="download-section" class="download-section hidden">
+      <div class="filename-input">
+        <label for="filename">Filename:</label>
+        <input type="text" id="filename" placeholder="video.mp4">
+      </div>
+      <button id="download-btn" class="btn btn-primary">
+        <span class="btn-text">Download</span>
+        <span class="btn-progress hidden">Downloading...</span>
+      </button>
+    </div>
+    
+    <!-- Download Progress -->
+    <div id="download-progress" class="download-progress hidden">
+      <div class="progress-header">
+        <span id="progress-filename">downloading...</span>
+        <span id="progress-percent">0%</span>
+      </div>
       <div class="progress-bar">
         <div id="progress-fill"></div>
       </div>
-      <span id="progress-text">0%</span>
+      <div class="progress-info">
+        <span id="progress-speed"></span>
+        <button id="cancel-btn" class="btn btn-cancel">Cancel</button>
+      </div>
     </div>
     
-    <div id="error" class="hidden error">
+    <!-- Error -->
+    <div id="error" class="error hidden">
       <span id="error-message"></span>
+      <button id="error-dismiss" class="btn-dismiss">×</button>
     </div>
+    
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <span class="version">v1.0.0</span>
+    </footer>
   </div>
   
   <script src="popup.js"></script>

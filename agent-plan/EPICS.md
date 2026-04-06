@@ -20,7 +20,7 @@ Build a browser extension (Chrome/Edge) with companion native app for downloadin
 | EP-01 | Project Setup & Infrastructure | P1 | DN | 6 |
 | EP-02 | Browser Extension Core | P1 | DN | 5 |
 | EP-03 | Video Detection & Parsing | P1 | DN | 5 |
-| EP-04 | UI Implementation | P1 | NS | 5 |
+| EP-04 | UI Implementation | P1 | IP | 5 |
 | EP-05 | Companion App (CoApp) | P1 | NS | 5 |
 | EP-06 | Extension ↔ CoApp Communication | P1 | NS | 4 |
 | EP-07 | FFmpeg Integration | P1 | NS | 5 |
@@ -63,7 +63,7 @@ T-05 │ P2 │ DN │ tasks/EP-03-video-detection/T-05-dom-analysis.md
 
 ### EP-04: UI Implementation
 ```
-T-01 │ P1 │ NS │ tasks/EP-04-ui/T-01-popup-html-css.md
+T-01 │ P1 │ DN │ tasks/EP-04-ui/T-01-popup-html-css.md
 T-02 │ P1 │ NS │ tasks/EP-04-ui/T-02-quality-selector.md
 T-03 │ P1 │ NS │ tasks/EP-04-ui/T-03-download-progress.md
 T-04 │ P2 │ NS │ tasks/EP-04-ui/T-04-settings-page.md
