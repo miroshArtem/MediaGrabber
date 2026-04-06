@@ -10,12 +10,103 @@ interface DetectedMedia {
   pageUrl: string;
 }
 
+class NetworkInterceptor {
+  private interceptedUrls = new Set<string>();
+  private mediaDetector: MediaDetector;
+  
+  constructor(mediaDetector: MediaDetector) {
+    this.mediaDetector = mediaDetector;
+  }
+  
+  setup(): void {
+    chrome.webRequest.onBeforeRequest.addListener(
+      (details) => {
+        // Skip non-main-frame requests for most media types
+        // But always capture manifest files
+        const isManifest = details.url.includes('.m3u8') || details.url.includes('.mpd');
+        if (details.frameId !== 0 && !isManifest) {
+          return;
+        }
+        
+        const url = details.url;
+        
+        // Skip already intercepted
+        if (this.interceptedUrls.has(url)) return;
+        
+        // Check if media-related
+        if (this.isMediaUrl(url)) {
+          this.interceptedUrls.add(url);
+          this.onMediaUrlDetected(url, details);
+        }
+      },
+      { urls: ['<all_urls>'] }
+    );
+  }
+  
+  private isMediaUrl(url: string): boolean {
+    const lower = url.toLowerCase();
+    return (
+      lower.includes('.m3u8') ||
+      lower.includes('.mpd') ||
+      lower.includes('/manifest') ||
+      lower.includes('.mp4') ||
+      lower.includes('.webm') ||
+      lower.includes('.ts') ||
+      lower.includes('.m4s') ||
+      lower.includes('.m4a') ||
+      lower.includes('.aac')
+    );
+  }
+  
+  private onMediaUrlDetected(url: string, details: any): void {
+    const type = this.guessMediaType(url);
+    console.log('[MediaGrabber] Media URL intercepted:', url, type);
+    
+    // Send to background
+    chrome.runtime.sendMessage({
+      type: 'VIDEO_DETECTED',
+      video: {
+        id: this.generateVideoId(url),
+        title: this.extractTitle(),
+        url: url,
+        type: type,
+        qualities: []
+      }
+    });
+  }
+  
+  private guessMediaType(url: string): 'hls' | 'dash' | 'mp4' | 'webm' | 'direct' {
+    const lower = url.toLowerCase();
+    if (lower.includes('.m3u8')) return 'hls';
+    if (lower.includes('.mpd')) return 'dash';
+    if (lower.includes('.mp4')) return 'mp4';
+    if (lower.includes('.webm')) return 'webm';
+    return 'direct';
+  }
+  
+  private generateVideoId(url: string): string {
+    return `video_${btoa(url).substring(0, 20)}_${Date.now()}`;
+  }
+  
+  private extractTitle(): string {
+    const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content');
+    if (ogTitle) return ogTitle;
+    
+    const twitterTitle = document.querySelector('meta[name="twitter:title"]')?.getAttribute('content');
+    if (twitterTitle) return twitterTitle;
+    
+    return document.title || 'Unknown Video';
+  }
+}
+
 class MediaDetector {
   private mediaUrls = new Set<string>();
   private manifestUrls = new Set<string>();
   private detectedVideos: VideoInfo[] = [];
+  private networkInterceptor: NetworkInterceptor;
   
   constructor() {
+    this.networkInterceptor = new NetworkInterceptor(this);
     this.setupWebRequestListener();
     this.setupDOMObserver();
     this.scanExistingMedia();
@@ -23,12 +114,9 @@ class MediaDetector {
   
   /**
    * Set up webRequest listener for network interception
-   * Note: Requires "webRequest" permission in manifest
    */
   private setupWebRequestListener(): void {
-    // This will be implemented when we have the proper permission
-    // For now, we'll rely on DOM analysis and manual detection
-    console.log('[MediaGrabber] Content script loaded');
+    this.networkInterceptor.setup();
   }
   
   /**
@@ -80,7 +168,6 @@ class MediaDetector {
     // Check for iframe elements that might contain media
     document.querySelectorAll('iframe').forEach(iframe => {
       try {
-        // Only if same origin
         const src = iframe.getAttribute('src');
         if (src && this.isMediaUrl(src)) {
           this.handleMediaUrl(src);

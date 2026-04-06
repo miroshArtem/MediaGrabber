@@ -10,6 +10,7 @@ export interface DownloadRequest {
   quality?: string;
   format?: 'mp4' | 'webm' | 'mkv';
   savePath?: string;
+  filename?: string;
 }
 
 export interface DownloadResponse {
@@ -20,8 +21,8 @@ export interface DownloadResponse {
 
 export interface VideoQuality {
   height: number;
-  width: number;
-  bitrate: number;
+  width?: number;
+  bitrate?: number;
   url: string;
 }
 
@@ -29,7 +30,7 @@ export interface VideoInfo {
   id: string;
   title: string;
   url: string;
-  type: 'm3u8' | 'mpd' | 'direct';
+  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm';
   qualities: VideoQuality[];
   thumbnail?: string;
   duration?: number;
