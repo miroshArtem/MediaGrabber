@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - (2026-04-07) Fixed native-client.ts - removed unused NativeMessage import
 - (2026-04-07) Fixed downloads.ts FFmpegProgress initialization - corrected format from `{ time: 0 }` to proper `{ outTimeMs: '0', frame: 0, ... }`
 - (2026-04-07) Fixed EPICS.md task statuses - updated EP-05 T-05, EP-06 (all), EP-07 (all) from NS to DN
+- (2026-04-07) Fixed main.ts type mismatch - DownloadManager now receives FFmpegConverter instead of FileOperations
 
 ---
 
