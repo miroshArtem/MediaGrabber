@@ -7,16 +7,19 @@ import { NativeMessagingHost } from './native-messaging';
 import { DownloadManager } from './downloads';
 import { FileOperations } from './file';
 import { RpcProtocol } from './rpc';
+import { FFmpegConverter } from './converter';
 
 class MediaGrabberApp {
   private nativeHost: NativeMessagingHost;
   private downloadManager: DownloadManager;
   private fileOps: FileOperations;
   private rpc: RpcProtocol;
+  private ffmpeg: FFmpegConverter;
   
   constructor() {
     this.fileOps = new FileOperations();
-    this.downloadManager = new DownloadManager(this.fileOps);
+    this.ffmpeg = new FFmpegConverter();
+    this.downloadManager = new DownloadManager(this.ffmpeg);
     this.rpc = new RpcProtocol();
     this.nativeHost = new NativeMessagingHost(this.rpc);
   }
@@ -34,26 +37,13 @@ class MediaGrabberApp {
   }
   
   private async checkFfmpeg(): Promise<void> {
-    const ffmpegPath = this.getFfmpegPath();
+    const ffmpegPath = this.ffmpeg.getPath();
     
     if (!fs.existsSync(ffmpegPath)) {
       console.warn('[MediaGrabber] FFmpeg not found at:', ffmpegPath);
       console.warn('[MediaGrabber] Downloads will fail until FFmpeg is installed');
     } else {
       console.log('[MediaGrabber] FFmpeg found at:', ffmpegPath);
-    }
-  }
-  
-  private getFfmpegPath(): string {
-    const platform = process.platform;
-    const baseDir = path.dirname(process.execPath);
-    
-    if (platform === 'win32') {
-      return path.join(baseDir, 'ffmpeg', 'win', 'ffmpeg.exe');
-    } else if (platform === 'darwin') {
-      return path.join(baseDir, 'ffmpeg', 'mac', 'ffmpeg');
-    } else {
-      return path.join(baseDir, 'ffmpeg', 'linux', 'ffmpeg');
     }
   }
 }
