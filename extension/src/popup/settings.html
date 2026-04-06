@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediaGrabber Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="settings-container">
+    <header class="settings-header">
+      <h1>Settings</h1>
+      <button id="close-btn" class="icon-btn" title="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </header>
+    
+    <div class="settings-content">
+      <!-- Download Directory -->
+      <div class="setting-item">
+        <label for="download-path">Download Directory</label>
+        <div class="input-with-button">
+          <input type="text" id="download-path" placeholder="Default browser directory">
+          <button id="browse-btn" class="btn btn-secondary">Browse</button>
+        </div>
+        <p class="setting-help">Leave empty to use browser's default download location</p>
+      </div>
+      
+      <!-- Default Quality -->
+      <div class="setting-item">
+        <label for="default-quality">Default Quality</label>
+        <select id="default-quality">
+          <option value="best">Best Available</option>
+          <option value="worst">Lowest Quality</option>
+          <option value="ask">Ask Each Time</option>
+        </select>
+      </div>
+      
+      <!-- Auto Download -->
+      <div class="setting-item">
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-download">
+          <span class="checkbox-text">Auto-download when media detected</span>
+        </label>
+        <p class="setting-help">Automatically start download when media is found on page</p>
+      </div>
+      
+      <!-- Notifications -->
+      <div class="setting-item">
+        <label class="checkbox-label">
+          <input type="checkbox" id="show-notifications" checked>
+          <span class="checkbox-text">Show notifications</span>
+        </label>
+        <p class="setting-help">Display notifications for download progress and completion</p>
+      </div>
+      
+      <!-- CoApp Status -->
+      <div class="setting-item">
+        <label>CoApp Status</label>
+        <div class="status-display">
+          <span id="coapp-status" class="status-indicator checking">Checking...</span>
+          <span id="coapp-version" class="version-text"></span>
+        </div>
+        <p class="setting-help">Native companion app for advanced download features</p>
+      </div>
+    </div>
+    
+    <footer class="settings-footer">
+      <button id="reset-btn" class="btn btn-secondary">Reset to Defaults</button>
+      <button id="save-btn" class="btn btn-primary">Save Settings</button>
+    </footer>
+  </div>
+  
+  <script src="settings.js"></script>
+</body>
+</html>
