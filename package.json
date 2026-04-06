@@ -1,0 +1,18 @@
+{
+  "name": "mediagrabber",
+  "version": "1.0.0",
+  "description": "Browser extension + CoApp for downloading online videos",
+  "private": true,
+  "workspaces": [
+    "extension",
+    "coapp"
+  ],
+  "scripts": {
+    "build:extension": "cd extension && npm run build",
+    "build:coapp": "cd coapp && npm run build",
+    "build": "npm run build:extension && npm run build:coapp",
+    "package:extension": "cd extension && npm run package",
+    "dev:extension": "cd extension && npm run watch",
+    "dev:coapp": "cd coapp && npm run watch"
+  }
+}

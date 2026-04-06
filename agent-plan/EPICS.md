@@ -39,7 +39,7 @@ T-01 │ P1 │ DN │ tasks/EP-01-project-structure/T-01-project-structure.md
 T-02 │ P1 │ DN │ tasks/EP-01-project-structure/T-02-extension-package.md
 T-03 │ P1 │ DN │ tasks/EP-01-project-structure/T-03-coapp-package.md
 T-04 │ P1 │ DN │ tasks/EP-01-project-structure/T-04-typescript-config.md
-T-05 │ P1 │ NS │ tasks/EP-01-project-structure/T-05-git-setup.md
+T-05 │ P1 │ DN │ tasks/EP-01-project-structure/T-05-git-setup.md
 T-06 │ P2 │ NS │ tasks/EP-01-project-structure/T-06-build-pipeline.md
 ```
 
