@@ -78,7 +78,7 @@ export class RpcProtocol {
       const result = await handler(params);
       return this.createSuccessResponse(request, result);
     } catch (error) {
-      return this.createErrorResponse(request, error.message || 'Unknown error');
+      return this.createErrorResponse(request, (error as Error).message || 'Unknown error');
     }
   }
   

@@ -55,7 +55,7 @@ export class DownloadManager {
       url: options.url,
       outputPath,
       status: 'pending',
-      progress: { percent: 0, time: 0 },
+      progress: { percent: 0, outTimeMs: '0', frame: 0, fps: 0, bitrate: '', totalSize: 0, speed: '' },
       startedAt: new Date()
     };
     

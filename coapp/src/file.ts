@@ -82,12 +82,28 @@ export class FileOperations {
    * Get available disk space
    */
   getFreeSpace(dirPath: string): number {
-    // This is a simplified version - actual implementation would use platform-specific methods
-    try {
-      const stats = fs.statfsSync(dirPath);
-      return stats.bsize * stats.bfree;
-    } catch {
-      return -1;
+    // Platform-specific implementation
+    if (process.platform === 'win32') {
+      // Use drive letter from path
+      try {
+        const drive = path.parse(dirPath).root.split(':')[0] + ':';
+        const { execSync } = require('child_process');
+        const output = execSync(`wmic logicaldisk where "DeviceID='${drive}'" get FreeSpace /value`, { encoding: 'utf8' });
+        const match = output.match(/FreeSpace=(\d+)/);
+        return match ? parseInt(match[1], 10) : -1;
+      } catch {
+        return -1;
+      }
+    } else {
+      // Unix-like systems
+      try {
+        const { execSync } = require('child_process');
+        const output = execSync(`df -k "${dirPath}" | tail -1`, { encoding: 'utf8' });
+        const parts = output.split(/\s+/);
+        return parseInt(parts[3], 10) * 1024; // Convert KB to bytes
+      } catch {
+        return -1;
+      }
     }
   }
   

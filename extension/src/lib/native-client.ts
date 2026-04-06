@@ -1,7 +1,7 @@
 // Native Messaging Client
 // Handles communication with CoApp via native messaging protocol (weh#rpc)
 
-import { NativeMessage, DownloadRequest, DownloadResponse } from './types';
+import { DownloadRequest, DownloadResponse } from './types';
 import { ConnectionError, TimeoutError, MethodError, CoAppError } from './errors';
 
 const APP_ID = 'com.mediagrabber.coapp';

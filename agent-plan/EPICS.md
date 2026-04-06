@@ -1,7 +1,7 @@
 # EPICS — MediaGrabber Project
 
 Project: MediaGrabber (Video Download Extension)  
-Last updated: 2026-04-07 01:30
+Last updated: 2026-04-07 01:45
 
 ---
 
@@ -76,24 +76,24 @@ T-01 │ P1 │ DN │ tasks/EP-05-coapp/T-01-native-messaging-host.md
 T-02 │ P1 │ DN │ tasks/EP-05-coapp/T-02-rpc-protocol.md
 T-03 │ P1 │ DN │ tasks/EP-05-coapp/T-03-file-operations.md
 T-04 │ P1 │ DN │ tasks/EP-05-coapp/T-04-download-manager.md
-T-05 │ P1 │ NS │ tasks/EP-05-coapp/T-05-windows-registry.md
+T-05 │ P1 │ DN │ tasks/EP-05-coapp/T-05-windows-registry.md
 ```
 
 ### EP-06: Extension ↔ CoApp Communication
 ```
-T-01 │ P1 │ NS │ tasks/EP-06-communication/T-01-native-messaging-client.md
-T-02 │ P1 │ NS │ tasks/EP-06-communication/T-02-request-response.md
-T-03 │ P1 │ NS │ tasks/EP-06-communication/T-03-progress-callbacks.md
-T-04 │ P1 │ NS │ tasks/EP-06-communication/T-04-error-handling.md
+T-01 │ P1 │ DN │ tasks/EP-06-communication/T-01-native-messaging-client.md
+T-02 │ P1 │ DN │ tasks/EP-06-communication/T-02-request-response.md
+T-03 │ P1 │ DN │ tasks/EP-06-communication/T-03-progress-callbacks.md
+T-04 │ P1 │ DN │ tasks/EP-06-communication/T-04-error-handling.md
 ```
 
 ### EP-07: FFmpeg Integration
 ```
-T-01 │ P1 │ NS │ tasks/EP-07-ffmpeg/T-01-ffmpeg-wrapper.md
-T-02 │ P1 │ NS │ tasks/EP-07-ffmpeg/T-02-hls-download.md
-T-03 │ P1 │ NS │ tasks/EP-07-ffmpeg/T-03-dash-download.md
-T-04 │ P1 │ NS │ tasks/EP-07-ffmpeg/T-04-stream-merging.md
-T-05 │ P1 │ NS │ tasks/EP-07-ffmpeg/T-05-progress-parsing.md
+T-01 │ P1 │ DN │ tasks/EP-07-ffmpeg/T-01-ffmpeg-wrapper.md
+T-02 │ P1 │ DN │ tasks/EP-07-ffmpeg/T-02-hls-download.md
+T-03 │ P1 │ DN │ tasks/EP-07-ffmpeg/T-03-dash-download.md
+T-04 │ P1 │ DN │ tasks/EP-07-ffmpeg/T-04-stream-merging.md
+T-05 │ P1 │ DN │ tasks/EP-07-ffmpeg/T-05-progress-parsing.md
 ```
 
 ### EP-08: Chrome Web Store Publishing
