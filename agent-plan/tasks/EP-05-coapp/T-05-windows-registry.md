@@ -2,8 +2,8 @@
 
 **Epic**: EP-05 (Companion App Development)
 **Priority**: P1
-**Status**: NS (not started)
-**Last updated**: 2026-04-06 22:25
+**Status**: DN (done)
+**Last updated**: 2026-04-07 00:50
 
 ---
 

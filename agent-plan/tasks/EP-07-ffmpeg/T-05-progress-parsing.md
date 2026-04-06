@@ -2,7 +2,7 @@
 
 **Epic**: EP-07 (FFmpeg Integration)
 **Priority**: P1
-**Status**: NS (not started)
+**Status**: DN (done)
 **Last updated**: 2026-04-06 22:35
 
 ---

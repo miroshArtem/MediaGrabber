@@ -224,6 +224,42 @@ async function startDownload(video: VideoInfo, filename?: string): Promise<any> 
       throw new Error('CoApp not connected');
     }
   }
+
+  // Set up progress notifications before starting download
+  nativeClient.onNotify('convertOutput', (progressTime: number, currentSeconds: number, info: any) => {
+    // Send progress to popup
+    popupPorts.forEach(port => {
+      port.postMessage({
+        type: 'DOWNLOAD_PROGRESS',
+        progress: {
+          timeMs: progressTime,
+          currentSeconds,
+          percent: video.duration ? (currentSeconds / video.duration) * 100 : 0,
+          ...info
+        }
+      });
+    });
+  });
+
+  nativeClient.onNotify('downloadComplete', (downloadId: string, outputPath: string) => {
+    popupPorts.forEach(port => {
+      port.postMessage({
+        type: 'DOWNLOAD_COMPLETE',
+        downloadId,
+        outputPath
+      });
+    });
+  });
+
+  nativeClient.onNotify('downloadError', (downloadId: string, error: string) => {
+    popupPorts.forEach(port => {
+      port.postMessage({
+        type: 'DOWNLOAD_ERROR',
+        downloadId,
+        error
+      });
+    });
+  });
   
   return nativeClient.sendDownloadRequest({
     url: video.url,

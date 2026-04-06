@@ -2,7 +2,7 @@
 
 **Epic**: EP-06 (Extension ↔ CoApp Communication)
 **Priority**: P1
-**Status**: NS (not started)
+**Status**: DN (done)
 **Last updated**: 2026-04-06 22:30
 
 ---

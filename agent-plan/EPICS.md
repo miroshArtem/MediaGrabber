@@ -1,7 +1,7 @@
 # EPICS — MediaGrabber Project
 
 Project: MediaGrabber (Video Download Extension)  
-Last updated: 2026-04-07 00:42
+Last updated: 2026-04-07 01:30
 
 ---
 
@@ -21,9 +21,9 @@ Build a browser extension (Chrome/Edge) with companion native app for downloadin
 | EP-02 | Browser Extension Core | P1 | DN | 5 |
 | EP-03 | Video Detection & Parsing | P1 | DN | 5 |
 | EP-04 | UI Implementation | P1 | DN | 5 |
-| EP-05 | Companion App (CoApp) | P1 | NS | 5 |
-| EP-06 | Extension ↔ CoApp Communication | P1 | NS | 4 |
-| EP-07 | FFmpeg Integration | P1 | NS | 5 |
+| EP-05 | Companion App (CoApp) | P1 | DN | 5 |
+| EP-06 | Extension ↔ CoApp Communication | P1 | DN | 4 |
+| EP-07 | FFmpeg Integration | P1 | DN | 5 |
 | EP-08 | Chrome Web Store Publishing | P2 | NS | 4 |
 | EP-09 | Microsoft Edge Publishing | P2 | NS | 2 |
 
@@ -72,10 +72,10 @@ T-05 │ P2 │ DN │ tasks/EP-04-ui/T-05-icon-badge.md
 
 ### EP-05: Companion App (CoApp)
 ```
-T-01 │ P1 │ NS │ tasks/EP-05-coapp/T-01-native-messaging-host.md
-T-02 │ P1 │ NS │ tasks/EP-05-coapp/T-02-rpc-protocol.md
-T-03 │ P1 │ NS │ tasks/EP-05-coapp/T-03-file-operations.md
-T-04 │ P1 │ NS │ tasks/EP-05-coapp/T-04-download-manager.md
+T-01 │ P1 │ DN │ tasks/EP-05-coapp/T-01-native-messaging-host.md
+T-02 │ P1 │ DN │ tasks/EP-05-coapp/T-02-rpc-protocol.md
+T-03 │ P1 │ DN │ tasks/EP-05-coapp/T-03-file-operations.md
+T-04 │ P1 │ DN │ tasks/EP-05-coapp/T-04-download-manager.md
 T-05 │ P1 │ NS │ tasks/EP-05-coapp/T-05-windows-registry.md
 ```
 
@@ -202,6 +202,10 @@ When starting implementation:
 | 2026-04-06 23:30 | status | EP-01 T-06 | Marked DN - Build pipeline complete |
 | 2026-04-06 23:30 | status | EP-01 | Marked DN - Project setup complete |
 | 2026-04-07 00:12 | status | EP-03 | Marked DN - Video detection complete |
+| 2026-04-07 00:50 | status | EP-05 | Marked DN - CoApp complete (native-autoinstall.ts done) |
+| 2026-04-07 00:50 | status | EP-06 | Marked IP - Starting Extension ↔ CoApp Communication |
+| 2026-04-07 01:30 | status | EP-06 | Marked DN - Communication complete (native-client.ts, errors.ts) |
+| 2026-04-07 01:30 | status | EP-07 | Marked DN - FFmpeg integration complete (converter.ts updated) |
 | 2026-04-06 23:05 | created | extension/ | Created extension scaffold with manifest, src/, public/icons |
 | 2026-04-06 23:05 | created | coapp/ | Created CoApp scaffold with TypeScript sources |
 | 2026-04-06 23:05 | created | installer/ | Created platform-specific installer directories |
