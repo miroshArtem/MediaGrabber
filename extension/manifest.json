@@ -3,6 +3,7 @@
   "name": "MediaGrabber",
   "version": "1.0.0",
   "description": "Download online videos with quality selection",
+  "minimum_chrome_version": "102",
   "permissions": [
     "storage",
     "downloads",

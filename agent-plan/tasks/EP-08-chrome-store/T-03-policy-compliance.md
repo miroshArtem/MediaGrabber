@@ -2,7 +2,7 @@
 
 **Epic**: EP-08 (Chrome Web Store Publishing)
 **Priority**: P2
-**Status**: NS (not started)
+**Status**: DN (done)
 **Last updated**: 2026-04-06 22:40
 
 ---

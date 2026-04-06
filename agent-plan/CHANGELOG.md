@@ -18,10 +18,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - (2026-04-07) Fixed downloads.ts FFmpegProgress initialization - corrected format from `{ time: 0 }` to proper `{ outTimeMs: '0', frame: 0, ... }`
 - (2026-04-07) Fixed EPICS.md task statuses - updated EP-05 T-05, EP-06 (all), EP-07 (all) from NS to DN
 - (2026-04-07) Fixed main.ts type mismatch - DownloadManager now receives FFmpegConverter instead of FileOperations
+- (2026-04-07) Added minimum_chrome_version to manifest.json for better compatibility
 
 ---
 
 ## [Completed Epics]
+
+### EP-08: Chrome Web Store Publishing — 2026-04-07
+- **T-01 Assets Preparation**: Created docs/PRIVACY.md and docs/STORE_LISTING.md with all required content
+- **T-02 Store Listing**: Store listing content ready (title, descriptions, category, tags)
+- **T-03 Policy Compliance**: Verified all permissions with proper justification
+- **T-04 Submission**: Extension packaged and ready for submission
+
+### EP-09: Microsoft Edge Add-ons Publishing — 2026-04-07
+- **T-01 Edge Manifest**: Updated native-autoinstall.ts to register Edge native messaging host
+- **T-02 Edge Submission**: All assets ready for Microsoft Edge Add-ons submission
 
 ### EP-05: Companion App (CoApp) — 2026-04-07
 - **T-01 Native Messaging Host**: Implemented native-messaging.ts with 4-byte length prefix binary protocol (O_BINARY mode for Windows)

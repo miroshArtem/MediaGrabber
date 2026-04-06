@@ -33,9 +33,16 @@ function getManifestPath(): string {
   return path.join(getInstallDir(), MANIFEST_NAME);
 }
 
-function getRegistryKeyPath(): string {
+function getChromeRegistryKeyPath(): string {
   if (process.platform === 'win32') {
     return 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.mediagrabber.coapp';
+  }
+  return '';
+}
+
+function getEdgeRegistryKeyPath(): string {
+  if (process.platform === 'win32') {
+    return 'HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.mediagrabber.coapp';
   }
   return '';
 }
@@ -104,21 +111,42 @@ export async function unregisterManifest(): Promise<void> {
 
 // Windows registration
 async function registerWindows(manifestPath: string): Promise<void> {
-  const keyPath = getRegistryKeyPath();
+  // Register for Chrome
+  const chromeKeyPath = getChromeRegistryKeyPath();
   try {
-    execSync(`reg add "${keyPath}" /ve /d "${manifestPath}" /f`, { stdio: 'pipe' });
-    console.error(`[MediaGrabber] Registry key added: ${keyPath}`);
+    execSync(`reg add "${chromeKeyPath}" /ve /d "${manifestPath}" /f`, { stdio: 'pipe' });
+    console.error(`[MediaGrabber] Registry key added: ${chromeKeyPath}`);
   } catch (e) {
-    console.error('[MediaGrabber] Failed to add registry key:', e);
+    console.error('[MediaGrabber] Failed to add Chrome registry key:', e);
     throw e;
+  }
+  
+  // Register for Edge
+  const edgeKeyPath = getEdgeRegistryKeyPath();
+  try {
+    execSync(`reg add "${edgeKeyPath}" /ve /d "${manifestPath}" /f`, { stdio: 'pipe' });
+    console.error(`[MediaGrabber] Registry key added: ${edgeKeyPath}`);
+  } catch (e) {
+    console.error('[MediaGrabber] Failed to add Edge registry key:', e);
+    // Don't throw - Edge registration is not critical
   }
 }
 
 async function unregisterWindows(): Promise<void> {
-  const keyPath = getRegistryKeyPath();
+  // Unregister Chrome
+  const chromeKeyPath = getChromeRegistryKeyPath();
   try {
-    execSync(`reg delete "${keyPath}" /f`, { stdio: 'pipe' });
-    console.error(`[MediaGrabber] Registry key removed: ${keyPath}`);
+    execSync(`reg delete "${chromeKeyPath}" /f`, { stdio: 'pipe' });
+    console.error(`[MediaGrabber] Registry key removed: ${chromeKeyPath}`);
+  } catch {
+    // Key may not exist
+  }
+  
+  // Unregister Edge
+  const edgeKeyPath = getEdgeRegistryKeyPath();
+  try {
+    execSync(`reg delete "${edgeKeyPath}" /f`, { stdio: 'pipe' });
+    console.error(`[MediaGrabber] Registry key removed: ${edgeKeyPath}`);
   } catch {
     // Key may not exist
   }

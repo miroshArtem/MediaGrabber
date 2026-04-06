@@ -1,7 +1,7 @@
 # EPICS — MediaGrabber Project
 
 Project: MediaGrabber (Video Download Extension)  
-Last updated: 2026-04-07 01:45
+Last updated: 2026-04-07 02:00
 
 ---
 
@@ -24,8 +24,8 @@ Build a browser extension (Chrome/Edge) with companion native app for downloadin
 | EP-05 | Companion App (CoApp) | P1 | DN | 5 |
 | EP-06 | Extension ↔ CoApp Communication | P1 | DN | 4 |
 | EP-07 | FFmpeg Integration | P1 | DN | 5 |
-| EP-08 | Chrome Web Store Publishing | P2 | NS | 4 |
-| EP-09 | Microsoft Edge Publishing | P2 | NS | 2 |
+| EP-08 | Chrome Web Store Publishing | P2 | DN | 4 |
+| EP-09 | Microsoft Edge Publishing | P2 | DN | 2 |
 
 **Total Tasks**: 41
 
