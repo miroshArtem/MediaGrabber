@@ -4,21 +4,25 @@
   "version": "1.0.0",
   "description": "Download online videos with quality selection",
   "permissions": [
-    "activeTab",
     "storage",
-    "nativeMessaging"
+    "downloads",
+    "nativeMessaging",
+    "tabs",
+    "activeTab",
+    "webRequest"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "dist/background.js"
+    "service_worker": "dist/background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["dist/content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "action": {
@@ -28,7 +32,8 @@
       "32": "public/icons/icon-32.png",
       "48": "public/icons/icon-48.png",
       "128": "public/icons/icon-128.png"
-    }
+    },
+    "default_title": "MediaGrabber"
   },
   "icons": {
     "16": "public/icons/icon-16.png",
