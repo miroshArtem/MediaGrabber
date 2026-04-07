@@ -108,7 +108,7 @@ function setupEventListeners(): void {
 function requestMediaList(): void {
   if (port) {
     port.postMessage({ type: 'GET_MEDIA' });
-    updateStatus('Checking for media...', '');
+    updateStatus('Checking for media...');
   }
 }
 
@@ -362,7 +362,7 @@ function showDownloadingUI(): void {
   downloadProgress.classList.remove('hidden');
   
   // Reset progress
-  updateProgressUI({ percent: 0, speed: '' });
+  updateProgressUI({ percent: 0, speed: 0 });
 }
 
 function showDownloadStarted(downloadId: string): void {

@@ -1,7 +1,7 @@
 # EP-08: Chrome Web Store Publishing
 
 **Index**: agent-plan/EPICS.md  
-**Status**: NS  
+**Status**: DN  
 **Last updated**: 2026-04-06 21:50
 
 ## Goal

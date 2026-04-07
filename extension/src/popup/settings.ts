@@ -3,14 +3,14 @@
 
 import { Settings, DEFAULT_SETTINGS, loadSettings, saveSettings, resetSettings, checkCoAppStatus } from '../lib/settings';
 
-interface Settings {
+interface SettingsLocal {
   downloadPath: string;
   defaultQuality: 'best' | 'worst' | 'ask';
   autoDownload: boolean;
   showNotifications: boolean;
 }
 
-let currentSettings: Settings = { ...DEFAULT_SETTINGS };
+let currentSettings: SettingsLocal = { ...DEFAULT_SETTINGS };
 
 document.addEventListener('DOMContentLoaded', async () => {
   await initializeSettings();

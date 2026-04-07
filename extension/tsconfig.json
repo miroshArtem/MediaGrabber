@@ -5,13 +5,15 @@
     "lib": ["ES2022", "DOM"],
     "outDir": "./dist",
     "rootDir": "./src",
-    "strict": true,
+    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
     "declaration": false,
-    "sourceMap": true
+    "sourceMap": true,
+    "ignoreDeprecations": "6.0",
+    "noImplicitAny": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

@@ -158,7 +158,7 @@ export class DownloadManager {
         response.on('data', (chunk: Buffer) => {
           downloaded += chunk.length;
           const percent = total > 0 ? (downloaded / total) * 100 : 0;
-          this.updateProgress(download.id, { percent, time: 0 });
+          this.updateProgress(download.id, { percent, outTimeMs: '0', frame: 0, fps: 0, bitrate: '', totalSize: 0, speed: '' });
         });
         
         response.pipe(file);
