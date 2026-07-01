@@ -2,6 +2,7 @@
 // Handles quality selection, download initiation, and progress display
 
 import { loadSettings } from '../lib/settings';
+import { initTheme } from '../lib/theme';
 
 interface VideoQuality {
   height: number;
@@ -76,6 +77,7 @@ function initPopup(): void {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   initPopup();
   setupEventListeners();
   initializePopupState();
@@ -127,7 +129,7 @@ function setupEventListeners(): void {
 function requestMediaList(): void {
   if (port) {
     port.postMessage({ type: 'GET_MEDIA', tabId: activeTabId });
-    updateStatus('Checking for media...');
+    updateStatus('Checking for media…');
   }
 }
 
@@ -191,15 +193,15 @@ function createMediaItem(video: VideoInfo, index: number): HTMLElement {
   
   const iconHtml = video.thumbnail
     ? `<div class="media-thumbnail-wrapper">
-         <img class="media-thumbnail" alt="">
+         <img class="media-thumbnail" alt="${escapeHtml(video.title || 'Video thumbnail')}">
        </div>
        <div class="media-icon media-icon-fallback hidden">
-         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
            <polygon points="5 3 19 12 5 21 5 3"></polygon>
          </svg>
        </div>`
     : `<div class="media-icon">
-         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
            <polygon points="5 3 19 12 5 21 5 3"></polygon>
          </svg>
        </div>`;
@@ -424,7 +426,7 @@ function showDownloadingUI(): void {
 
 function showDownloadStarted(downloadId: string): void {
   currentDownloadId = downloadId;
-  updateStatus('Download started...', 'info');
+  updateStatus('Download started…', 'info');
 }
 
 function updateProgressUI(progress: any): void {
@@ -479,7 +481,7 @@ function showDownloadComplete(): void {
   const fill = document.getElementById('progress-fill');
   
   if (fill) fill.style.width = '100%';
-  if (fill) fill.style.background = '#4caf50';
+  if (fill) fill.style.background = 'var(--success)';
   
   // Auto close after 2 seconds
   setTimeout(() => {
@@ -517,7 +519,7 @@ function resetUI(): void {
   if (fill) {
     fill.classList.remove('indeterminate');
     fill.style.width = '0%';
-    fill.style.background = 'linear-gradient(90deg, #2196f3, #4caf50)';
+    fill.style.background = 'var(--accent)';
   }
 }
 

@@ -1,15 +1,19 @@
 // Settings Management
 // Handles loading, saving, and managing extension settings
 
+export type ThemeMode = 'dark' | 'light' | 'system';
+
 export interface Settings {
   defaultQuality: 'best' | 'worst' | 'ask';
   showNotifications: boolean;
+  theme: ThemeMode;
   coappPath?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   defaultQuality: 'ask',
-  showNotifications: true
+  showNotifications: true,
+  theme: 'system'
 };
 
 /**

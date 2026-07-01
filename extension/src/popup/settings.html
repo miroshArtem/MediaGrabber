@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0e1015" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
   <title>MediaGrabber Settings</title>
   <link rel="stylesheet" href="settings.css">
 </head>
@@ -10,8 +12,8 @@
   <div class="settings-container">
     <header class="settings-header">
       <h1>Settings</h1>
-      <button id="close-btn" class="icon-btn" title="Close">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button id="close-btn" class="icon-btn" aria-label="Back to Popup">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
@@ -19,10 +21,30 @@
     </header>
     
     <div class="settings-content">
+      <!-- Theme -->
+      <div class="setting-item">
+        <span class="setting-label">Appearance</span>
+        <div class="theme-segmented" id="theme-selector" role="group" aria-label="Theme Selection">
+          <button class="theme-option" data-theme="light" aria-label="Light Theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+            Light
+          </button>
+          <button class="theme-option" data-theme="dark" aria-label="Dark Theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            Dark
+          </button>
+          <button class="theme-option" data-theme="system" aria-label="System Theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            System
+          </button>
+        </div>
+        <p class="setting-help">Choose how MediaGrabber looks</p>
+      </div>
+      
       <!-- Default Quality -->
       <div class="setting-item">
         <label for="default-quality">Default Quality</label>
-        <select id="default-quality">
+        <select id="default-quality" name="default-quality">
           <option value="best">Best Available</option>
           <option value="worst">Lowest Quality</option>
           <option value="ask">Ask Each Time</option>
@@ -32,17 +54,17 @@
       <!-- Notifications -->
       <div class="setting-item">
         <label class="checkbox-label">
-          <input type="checkbox" id="show-notifications" checked>
-          <span class="checkbox-text">Show notifications</span>
+          <input type="checkbox" id="show-notifications" name="show-notifications" checked>
+          <span class="checkbox-text">Show Notifications</span>
         </label>
         <p class="setting-help">Display notifications for download progress and completion</p>
       </div>
       
       <!-- CoApp Status -->
       <div class="setting-item">
-        <label>CoApp Status</label>
+        <span class="setting-label">CoApp Status</span>
         <div class="status-display">
-          <span id="coapp-status" class="status-indicator checking">Checking...</span>
+          <span id="coapp-status" class="status-indicator checking">Checking…</span>
           <span id="coapp-version" class="version-text"></span>
         </div>
         <p class="setting-help">Native companion app for advanced download features</p>
@@ -50,7 +72,7 @@
     </div>
     
     <footer class="settings-footer">
-      <button id="reset-btn" class="btn btn-secondary">Reset to Defaults</button>
+      <button id="reset-btn" class="btn btn-secondary">Reset</button>
       <button id="save-btn" class="btn btn-primary">Save Settings</button>
     </footer>
   </div>

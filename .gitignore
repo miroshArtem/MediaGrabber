@@ -53,3 +53,7 @@ extension/src/lib/*.js
 
 # CoApp compiled JS
 coapp/dist/
+
+
+.opencode/
+agent-plan/
