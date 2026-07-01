@@ -4,6 +4,7 @@
 import { NativeClient } from './lib/native-client';
 import { VideoInfo } from './lib/types';
 import { M3U8ParserWrapper } from './lib/m3u8-parser';
+import { loadSettings, Settings } from './lib/settings';
 
 interface PageMetadata {
   title?: string;
@@ -35,6 +36,33 @@ const popupPorts = new Set<chrome.runtime.Port>();
 // Default download directory (sent by CoApp or fallback)
 let defaultDownloadDir = '';
 let coappPlatform = '';
+let cachedSettings: Settings | null = null;
+
+async function getSettings(): Promise<Settings> {
+  if (!cachedSettings) {
+    cachedSettings = await loadSettings();
+  }
+  return cachedSettings;
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.settings) {
+    cachedSettings = changes.settings.newValue || null;
+  }
+});
+
+function notify(title: string, message: string): void {
+  getSettings().then(settings => {
+    if (settings.showNotifications) {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'public/icons/icon-128.png',
+        title: `MediaGrabber — ${title}`,
+        message
+      });
+    }
+  });
+}
 
 // Register handlers for CoApp → extension calls (push progress)
 nativeClient.listen({
@@ -413,16 +441,19 @@ async function startDownload(video: VideoInfo, filename?: string): Promise<any> 
       { progressTime: 1000, startHandler: downloadKey }
     ).then(result => {
       if (result.exitCode === 0) {
+        notify('Download complete', outFilename);
         popupPorts.forEach(port => {
           port.postMessage({ type: 'DOWNLOAD_COMPLETE', downloadId: downloadKey, outputPath });
         });
       } else {
+        notify('Download failed', outFilename);
         popupPorts.forEach(port => {
           port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: `FFmpeg exit code ${result.exitCode}: ${result.stderr}` });
         });
       }
       activeDownloads.delete(downloadKey);
     }).catch(err => {
+      notify('Download failed', err.message);
       popupPorts.forEach(port => {
         port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: err.message });
       });
@@ -525,8 +556,18 @@ async function handleMessage(message: any, sender: chrome.runtime.MessageSender)
     case 'GET_VIDEOS':
       return getVideosForTab(message.tabId);
 
-    case 'PING':
-      return { success: true, timestamp: Date.now() };
+    case 'PING': {
+      let connected = false;
+      let version: string | undefined;
+      try {
+        connected = nativeClient.connected;
+        if (connected) {
+          const info = await nativeClient.info();
+          version = info?.version || 'unknown';
+        }
+      } catch { /* ignore */ }
+      return { success: true, timestamp: Date.now(), connected, version };
+    }
 
     default:
       return { error: `Unknown message type: ${message.type}` };

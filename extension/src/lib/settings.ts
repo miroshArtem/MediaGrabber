@@ -2,17 +2,13 @@
 // Handles loading, saving, and managing extension settings
 
 export interface Settings {
-  downloadPath: string;
   defaultQuality: 'best' | 'worst' | 'ask';
-  autoDownload: boolean;
   showNotifications: boolean;
   coappPath?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  downloadPath: '',
   defaultQuality: 'ask',
-  autoDownload: false,
   showNotifications: true
 };
 

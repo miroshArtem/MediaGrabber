@@ -5,7 +5,7 @@
   "main": "dist/background.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "bundle": "esbuild src/background.ts --bundle --outfile=dist/background.js --platform=browser & esbuild src/content.ts --bundle --outfile=dist/content.js --platform=browser & esbuild src/popup/popup.ts --bundle --outfile=dist/popup.js --platform=browser",
+    "bundle": "esbuild src/background.ts --bundle --outfile=dist/background.js --platform=browser & esbuild src/content.ts --bundle --outfile=dist/content.js --platform=browser & esbuild src/popup/popup.ts --bundle --outfile=dist/popup.js --platform=browser & esbuild src/popup/settings.ts --bundle --outfile=dist/settings.js --platform=browser",
     "clean": "powershell Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue",
     "package": "cd dist & powershell Compress-Archive -Path * -DestinationPath ../MediaGrabber.zip -Force"
   },

@@ -4,9 +4,7 @@
 import { Settings, DEFAULT_SETTINGS, loadSettings, saveSettings, resetSettings, checkCoAppStatus } from '../lib/settings';
 
 interface SettingsLocal {
-  downloadPath: string;
   defaultQuality: 'best' | 'worst' | 'ask';
-  autoDownload: boolean;
   showNotifications: boolean;
 }
 
@@ -23,14 +21,10 @@ async function initializeSettings(): Promise<void> {
     currentSettings = await loadSettings();
     
     // Populate form
-    const downloadPath = document.getElementById('download-path') as HTMLInputElement;
     const defaultQuality = document.getElementById('default-quality') as HTMLSelectElement;
-    const autoDownload = document.getElementById('auto-download') as HTMLInputElement;
     const showNotifications = document.getElementById('show-notifications') as HTMLInputElement;
     
-    if (downloadPath) downloadPath.value = currentSettings.downloadPath;
     if (defaultQuality) defaultQuality.value = currentSettings.defaultQuality;
-    if (autoDownload) autoDownload.checked = currentSettings.autoDownload;
     if (showNotifications) showNotifications.checked = currentSettings.showNotifications;
   } catch (error) {
     console.error('[Settings] Failed to load settings:', error);
@@ -40,18 +34,7 @@ async function initializeSettings(): Promise<void> {
 function setupEventListeners(): void {
   // Close button
   document.getElementById('close-btn')?.addEventListener('click', () => {
-    window.close();
-  });
-  
-  // Browse button
-  document.getElementById('browse-btn')?.addEventListener('click', async () => {
-    // Note: chrome.downloads doesn't provide directory picker API
-    // User must enter path manually or we use default
-    const downloadPath = document.getElementById('download-path') as HTMLInputElement;
-    if (downloadPath) {
-      downloadPath.value = ''; // Reset to default
-      showNotification('Using browser default download directory');
-    }
+    window.location.href = 'popup.html';
   });
   
   // Save button
@@ -66,15 +49,11 @@ function setupEventListeners(): void {
 }
 
 async function saveCurrentSettings(): Promise<void> {
-  const downloadPath = document.getElementById('download-path') as HTMLInputElement;
   const defaultQuality = document.getElementById('default-quality') as HTMLSelectElement;
-  const autoDownload = document.getElementById('auto-download') as HTMLInputElement;
   const showNotifications = document.getElementById('show-notifications') as HTMLInputElement;
   
   const settings: Settings = {
-    downloadPath: downloadPath?.value || '',
     defaultQuality: (defaultQuality?.value as Settings['defaultQuality']) || 'ask',
-    autoDownload: autoDownload?.checked || false,
     showNotifications: showNotifications?.checked ?? true
   };
   
@@ -96,14 +75,10 @@ async function handleResetSettings(): Promise<void> {
     currentSettings = await resetSettings();
     
     // Update form
-    const downloadPath = document.getElementById('download-path') as HTMLInputElement;
     const defaultQuality = document.getElementById('default-quality') as HTMLSelectElement;
-    const autoDownload = document.getElementById('auto-download') as HTMLInputElement;
     const showNotifications = document.getElementById('show-notifications') as HTMLInputElement;
     
-    if (downloadPath) downloadPath.value = '';
     if (defaultQuality) defaultQuality.value = 'ask';
-    if (autoDownload) autoDownload.checked = false;
     if (showNotifications) showNotifications.checked = true;
     
     showNotification('Settings reset to defaults');

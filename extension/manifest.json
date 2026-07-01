@@ -10,7 +10,8 @@
     "nativeMessaging",
     "tabs",
     "activeTab",
-    "webRequest"
+    "webRequest",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -35,6 +36,10 @@
       "128": "public/icons/icon-128.png"
     },
     "default_title": "MediaGrabber"
+  },
+  "options_ui": {
+    "page": "src/popup/settings.html",
+    "open_in_tab": true
   },
   "icons": {
     "16": "public/icons/icon-16.png",

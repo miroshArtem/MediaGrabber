@@ -1,6 +1,8 @@
 // Popup Script
 // Handles quality selection, download initiation, and progress display
 
+import { loadSettings } from '../lib/settings';
+
 interface VideoQuality {
   height: number;
   width?: number;
@@ -100,8 +102,7 @@ function setupEventListeners(): void {
   
   // Settings button
   document.getElementById('settings-btn')?.addEventListener('click', () => {
-    // TODO: Open settings page
-    console.log('[Popup] Settings clicked');
+    window.location.href = 'settings.html';
   });
   
   // Download button
@@ -342,8 +343,14 @@ function renderQualityList(): void {
     container.appendChild(option);
   });
   
-  // Select best quality by default
-  selectQuality(0);
+  // Select quality based on defaultQuality setting
+  loadSettings().then(settings => {
+    if (settings.defaultQuality === 'worst') {
+      selectQuality(currentQualities.length - 1);
+    } else {
+      selectQuality(0);
+    }
+  }).catch(() => selectQuality(0));
 }
 
 /**

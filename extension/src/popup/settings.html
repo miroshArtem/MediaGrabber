@@ -19,16 +19,6 @@
     </header>
     
     <div class="settings-content">
-      <!-- Download Directory -->
-      <div class="setting-item">
-        <label for="download-path">Download Directory</label>
-        <div class="input-with-button">
-          <input type="text" id="download-path" placeholder="Default browser directory">
-          <button id="browse-btn" class="btn btn-secondary">Browse</button>
-        </div>
-        <p class="setting-help">Leave empty to use browser's default download location</p>
-      </div>
-      
       <!-- Default Quality -->
       <div class="setting-item">
         <label for="default-quality">Default Quality</label>
@@ -37,15 +27,6 @@
           <option value="worst">Lowest Quality</option>
           <option value="ask">Ask Each Time</option>
         </select>
-      </div>
-      
-      <!-- Auto Download -->
-      <div class="setting-item">
-        <label class="checkbox-label">
-          <input type="checkbox" id="auto-download">
-          <span class="checkbox-text">Auto-download when media detected</span>
-        </label>
-        <p class="setting-help">Automatically start download when media is found on page</p>
       </div>
       
       <!-- Notifications -->
@@ -74,6 +55,6 @@
     </footer>
   </div>
   
-  <script type="module" src="../../dist/popup/settings.js"></script>
+  <script src="../../dist/settings.js"></script>
 </body>
 </html>
