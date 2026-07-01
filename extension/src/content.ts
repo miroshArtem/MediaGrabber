@@ -14,10 +14,16 @@ class MediaDetector {
   private mediaUrls = new Set<string>();
   private manifestUrls = new Set<string>();
   private detectedVideos: VideoInfo[] = [];
+  private lastMetadataKey = '';
+  private metadataTimer: number | undefined;
 
   constructor() {
     this.setupDOMObserver();
     this.scanExistingMedia();
+    this.scheduleMetadataSend();
+
+    document.addEventListener('DOMContentLoaded', () => this.sendPageMetadata(), { once: true });
+    window.addEventListener('load', () => this.sendPageMetadata(), { once: true });
   }
 
   /**
@@ -46,6 +52,8 @@ class MediaDetector {
           }
         });
       });
+
+      this.scheduleMetadataSend();
     });
 
     const startObserving = () => {
@@ -116,7 +124,38 @@ class MediaDetector {
     el.addEventListener('loadedmetadata', () => {
       const currentSrc = el.currentSrc;
       if (currentSrc) this.handleMediaUrl(currentSrc);
+      this.sendPageMetadata();
     });
+  }
+
+  private scheduleMetadataSend(): void {
+    if (this.metadataTimer !== undefined) return;
+    this.metadataTimer = window.setTimeout(() => {
+      this.metadataTimer = undefined;
+      this.sendPageMetadata();
+    }, 250);
+  }
+
+  private sendPageMetadata(): void {
+    const metadata = {
+      title: this.extractTitle(),
+      thumbnail: this.extractThumbnail(),
+      duration: this.getVideoDuration(),
+      pageUrl: window.location.href
+    };
+    const key = JSON.stringify(metadata);
+    if (key === this.lastMetadataKey) return;
+    this.lastMetadataKey = key;
+
+    try {
+      chrome.runtime.sendMessage({ type: 'PAGE_METADATA', metadata }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('[MediaGrabber] Failed to send page metadata:', chrome.runtime.lastError);
+        }
+      });
+    } catch (e) {
+      console.error('[MediaGrabber] Error sending page metadata:', e);
+    }
   }
 
   /**
@@ -184,7 +223,8 @@ class MediaDetector {
           url: media.url,
           type: media.type,
           qualities: media.qualities || [],
-          duration: this.getVideoDuration()
+          duration: this.getVideoDuration(),
+          thumbnail: this.extractThumbnail()
         }
       }, (response) => {
         if (chrome.runtime.lastError) {
@@ -218,6 +258,50 @@ class MediaDetector {
     if (twitterTitle) return twitterTitle;
 
     return document.title || 'Unknown Video';
+  }
+
+  /**
+   * Extract thumbnail URL using cascading fallback (VDH-style):
+   * 1. og:image meta tag
+   * 2. twitter:image meta tag
+   * 3. <video poster> attribute
+   * 4. DOM scraping: img[class*=poster/preview/thumb]
+   */
+  private extractThumbnail(): string | undefined {
+    const metaSelectors = [
+      'meta[property="og:image"]',
+      'meta[property="og:image:secure_url"]',
+      'meta[name="twitter:image"]',
+      'meta[property="twitter:image"]',
+      'meta[name="twitter:image:src"]',
+      'meta[itemprop="thumbnailUrl"]',
+      'meta[itemprop="image"]'
+    ];
+
+    for (const selector of metaSelectors) {
+      const image = this.normalizeImageUrl(document.querySelector(selector)?.getAttribute('content'));
+      if (image) return image;
+    }
+
+    const video = document.querySelector('video[poster]');
+    if (video) {
+      const poster = this.normalizeImageUrl(video.getAttribute('poster'));
+      if (poster) return poster;
+    }
+
+    const posterImg = document.querySelector('img[class*="poster" i], img[class*="preview" i], img[class*="thumb" i], img[alt*="poster" i], img[alt*="постер" i]');
+    if (posterImg instanceof HTMLImageElement) {
+      const src = this.normalizeImageUrl(posterImg.currentSrc || posterImg.getAttribute('src') || posterImg.getAttribute('data-src') || posterImg.getAttribute('data-original'));
+      if (src) return src;
+    }
+
+    return undefined;
+  }
+
+  private normalizeImageUrl(url: string | null | undefined): string | undefined {
+    const value = url?.trim();
+    if (!value || value.startsWith('data:image/gif')) return undefined;
+    return this.resolveUrl(value, window.location.href);
   }
 
   /**

@@ -5,11 +5,19 @@ import { NativeClient } from './lib/native-client';
 import { VideoInfo } from './lib/types';
 import { M3U8ParserWrapper } from './lib/m3u8-parser';
 
+interface PageMetadata {
+  title?: string;
+  thumbnail?: string;
+  duration?: number;
+  pageUrl?: string;
+}
+
 const nativeClient = new NativeClient();
 
 // Media storage by tabId
 const mediaByTab = new Map<number, VideoInfo[]>();
 const interceptedMediaByTab = new Map<number, Set<string>>();
+const pageMetadataByTab = new Map<number, PageMetadata>();
 
 // Active downloads: key = downloadKey, value = tracking info
 const activeDownloads = new Map<string, {
@@ -206,11 +214,15 @@ function upsertVideo(tabId: number, video: VideoInfo): void {
   const existingIndex = videos.findIndex((v) => v.url === video.url);
 
   if (existingIndex >= 0) {
+    const existing = videos[existingIndex];
     videos[existingIndex] = {
-      ...videos[existingIndex],
+      ...existing,
       ...video,
+      title: video.title || existing.title,
       qualities: video.qualities?.length ? video.qualities : videos[existingIndex].qualities,
-      childUrls: video.childUrls?.length ? video.childUrls : videos[existingIndex].childUrls
+      childUrls: video.childUrls?.length ? video.childUrls : videos[existingIndex].childUrls,
+      thumbnail: video.thumbnail || existing.thumbnail,
+      duration: video.duration || existing.duration
     };
   } else {
     videos.push(video);
@@ -233,7 +245,8 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
   seen.add(url);
   interceptedMediaByTab.set(tabId, seen);
 
-  const title = await getTabTitle(tabId);
+  const metadata = pageMetadataByTab.get(tabId);
+  const title = metadata?.title || await getTabTitle(tabId);
   const type = getMediaType(url);
 
   let qualities: VideoInfo['qualities'] = [];
@@ -273,7 +286,8 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
     type,
     qualities,
     childUrls,
-    duration
+    duration: duration || metadata?.duration,
+    thumbnail: metadata?.thumbnail
   });
 
   console.log('[MediaGrabber] Intercepted media:', url, type);
@@ -492,6 +506,9 @@ async function handleMessage(message: any, sender: chrome.runtime.MessageSender)
     case 'VIDEO_DETECTED':
       return handleVideoDetected(sender.tab?.id, message.video);
 
+    case 'PAGE_METADATA':
+      return handlePageMetadata(sender.tab?.id, message.metadata, sender.frameId);
+
     case 'GET_VIDEOS':
       return getVideosForTab(message.tabId);
 
@@ -508,6 +525,41 @@ function handleVideoDetected(tabId: number | undefined, video: VideoInfo): any {
   upsertVideo(tabId, video);
   console.log(`[MediaGrabber] Detected video on tab ${tabId}:`, video.title);
   return { success: true, count: (mediaByTab.get(tabId) || []).length };
+}
+
+function handlePageMetadata(tabId: number | undefined, metadata: PageMetadata, frameId?: number): any {
+  if (tabId === undefined) return { error: 'No tabId' };
+
+  const previous = pageMetadataByTab.get(tabId) || {};
+  const isTopFrame = frameId === 0;
+  const merged: PageMetadata = {
+    pageUrl: metadata.pageUrl || previous.pageUrl,
+    title: isTopFrame ? (metadata.title || previous.title) : (previous.title || metadata.title),
+    thumbnail: isTopFrame ? (metadata.thumbnail || previous.thumbnail) : (previous.thumbnail || metadata.thumbnail),
+    duration: metadata.duration || previous.duration
+  };
+
+  pageMetadataByTab.set(tabId, merged);
+
+  const videos = mediaByTab.get(tabId);
+  if (videos?.length) {
+    let changed = false;
+    const updated = videos.map((video) => {
+      const next = {
+        ...video,
+        thumbnail: video.thumbnail || merged.thumbnail,
+        duration: video.duration || merged.duration
+      };
+      changed = changed || next.thumbnail !== video.thumbnail || next.duration !== video.duration;
+      return next;
+    });
+
+    if (changed) {
+      commitVideos(tabId, updated);
+    }
+  }
+
+  return { success: true };
 }
 
 function getVideosForTab(tabId: number): any {

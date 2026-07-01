@@ -186,18 +186,38 @@ function createMediaItem(video: VideoInfo, index: number): HTMLElement {
   // Calculate duration if available
   const durationStr = video.duration ? formatDuration(video.duration) : '';
   
+  const iconHtml = video.thumbnail
+    ? `<div class="media-thumbnail-wrapper">
+         <img class="media-thumbnail" alt="">
+       </div>
+       <div class="media-icon media-icon-fallback hidden">
+         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+           <polygon points="5 3 19 12 5 21 5 3"></polygon>
+         </svg>
+       </div>`
+    : `<div class="media-icon">
+         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+           <polygon points="5 3 19 12 5 21 5 3"></polygon>
+         </svg>
+       </div>`;
+
   div.innerHTML = `
-    <div class="media-icon">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-      </svg>
-    </div>
+    ${iconHtml}
     <div class="media-info">
       <div class="media-type">${getTypeLabel(video.type)}</div>
       <div class="media-title">${escapeHtml(video.title || 'Unknown Video')}</div>
       ${durationStr ? `<div class="media-duration">${durationStr}</div>` : ''}
     </div>
   `;
+
+  const thumbnail = div.querySelector('.media-thumbnail') as HTMLImageElement | null;
+  if (thumbnail) {
+    thumbnail.src = video.thumbnail || '';
+    thumbnail.addEventListener('error', () => {
+      thumbnail.closest('.media-thumbnail-wrapper')?.classList.add('hidden');
+      div.querySelector('.media-icon-fallback')?.classList.remove('hidden');
+    });
+  }
   
   div.addEventListener('click', () => selectMedia(video, div));
   
