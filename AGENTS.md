@@ -1,58 +1,108 @@
 # MediaGrabber — Agent Instructions
 
-## Project Overview
+Browser extension (Chrome/Edge, Manifest V3) + Node.js companion app (CoApp) for downloading online videos with quality selection. Inspired by Video DownloadHelper. TypeScript throughout.
 
-Browser extension (Chrome/Edge) + native companion app for downloading online videos with quality selection. Inspired by Video DownloadHelper.
+## Monorepo Layout
 
-**Architecture**: Extension (Manifest V3, Service Worker) + CoApp (Node.js) + FFmpeg
+npm workspaces: `extension/` and `coapp/` are independent packages. Root `package.json` provides convenience scripts that `cd` into each.
 
-## Critical Execution Order
+| Dir | Package | Output | Notes |
+|-----|---------|--------|-------|
+| `extension/` | `mediagrabber-extension` | `dist/` | Manifest V3 service worker. Entry: `dist/background.js`. Bundles with esbuild (separate from `tsc` build). |
+| `coapp/` | `mediagrabber-coapp` | `dist/` | Native messaging host (stdio). Entry: `dist/main.js`. CommonJS. |
+| `docs/` | — | — | VDH research / reference docs, not implementation. |
+| `agent-plan/` | — | — | Project plan: epics (9), tasks (41). See below. |
+| `installer/` | — | — | `linux/` and `windows/` subdirs (platform installers). |
 
-This is a **planned project** — no code exists yet. Follow this order:
+## Commands
 
-1. **EP-01** (T-01→T-05) — Project setup first
-2. **EP-02** → **EP-04** — Extension + UI
-3. **EP-05** → **EP-06** → **EP-07** — CoApp + Communication + FFmpeg (can overlap with extension work)
-4. **EP-08** → **EP-09** — Stores (P2, can parallelize)
+```bash
+# Build everything (runs tsc in each workspace)
+npm run build
 
-## Key Technical Decisions (Do Not Change)
+# Build a single package
+npm run build:extension   # or: cd extension && npm run build
+npm run build:coapp      # or: cd coapp && npm run build
 
-| Decision | Value |
-|----------|-------|
-| Manifest V3 | Mandatory for Chrome Web Store (required since June 2024) |
-| Background | Service Worker (not persistent page) |
-| Native Messaging | 4-byte length prefix + JSON (like VDH) |
-| FFmpeg | Bundled with CoApp |
-| Language | TypeScript throughout |
+# Package extension for Chrome Web Store (creates MediaGrabber.zip)
+npm run package:extension   # or: cd extension && npm run package
 
-## Repository Structure
+# Dev / watch
+npm run dev:coapp           # coapp tsc --watch (works)
+# NOTE: npm run dev:extension is BROKEN — extension has no "watch" script.
+#       Use `cd extension && npm run build` after changes, or add a watch script.
+# IMPORTANT: after `npm run build`, run `cd extension && npm run bundle` (esbuild).
+#           tsc outputs ES modules with bare imports (no .js extensions) that Chrome
+#           service worker cannot resolve. esbuild bundles into a single IIFE file.
+#           The manifest does NOT use "type": "module" — it relies on the bundled output.
 
+# Run CoApp
+cd coapp && npm start        # node dist/main.js
+
+# Extension bundling (esbuild, separate from tsc build)
+cd extension && npm run bundle   # produces dist/background.js, content.js, popup.js
+
+# Native messaging host registration (Windows/macOS/Linux)
+cd coapp && node dist/native-autoinstall.js register [extension-id...]
+cd coapp && node dist/native-autoinstall.js unregister
 ```
-docs/           # Video DownloadHelper research (reference, not implementation)
-agent-plan/      # Project plan with epics (9) and tasks (41)
-  ├── EPICS.md  # Master task list
-  ├── epics/    # One file per epic
-  └── tasks/     # One folder per epic, task files inside
-extension/       # (to be created) Browser extension
-coapp/          # (to be created) Native companion app
-```
+
+Load unpacked extension: `chrome://extensions/` → Developer mode → Load unpacked → select `extension/dist/`.
+
+## Verification
+
+There are **no tests, lint, typecheck, or CI** configured. The only verification is a successful `tsc` build (`npm run build`). If asked to run tests or lint, they don't exist yet.
+
+## TypeScript Config Quirks
+
+- `tsconfig.base.json` exists at root but is **orphaned** — neither package extends it.
+- Both `extension/tsconfig.json` and `coapp/tsconfig.json` set `strict: false` and `noImplicitAny: false` (the base config sets `strict: true`; packages ignore it).
+- Both set `ignoreDeprecations: "6.0"` (TypeScript 6.0-specific).
+- Extension: ESNext modules, `lib: ["ES2022", "DOM"]`, no declarations.
+- CoApp: CommonJS, `lib: ["ES2022"]`, emits declarations + declaration maps.
+
+## Native Messaging Protocol
+
+Extension ↔ CoApp communicate via Chrome/Edge native messaging:
+- **Wire format**: 4-byte little-endian uint32 length prefix + UTF-8 JSON.
+- **RPC format**: `weh#rpc` protocol — **bidirectional** (both sides can call each other's methods). Requests use `_request`/`_method`/`_args`; responses use `_reply`/`_result`/`_error`.
+- `coapp/src/rpc.ts` is the CoApp-side singleton. `rpc.call(method, ...args)` sends a request TO the extension (returns Promise). `rpc.listen({name: handler})` registers handlers FOR requests FROM the extension.
+- `extension/src/lib/native-client.ts` is the extension-side mirror. `nativeClient.call(method, ...args)` sends requests to CoApp. `nativeClient.listen({name: handler})` registers handlers for CoApp→extension calls.
+- **Progress push**: CoApp calls `rpc.call('convertOutput', progressTime, currentSeconds, info)` to push FFmpeg progress to the extension (no polling). Extension handles it in `background.ts` via `nativeClient.listen({ convertOutput: ... })`.
+- FFmpeg `out_time_ms` is in **nanoseconds** — divide by 1,000,000 for seconds.
+- Native host name: `com.mediagrabber.coapp`.
+- Windows registration writes to `HKCU\Software\Google\Chrome\NativeMessagingHosts\...` and the Edge equivalent.
+- Dev registration script: `coapp/scripts/register-dev-host.ps1 -ExtensionId <id>` (builds a `pkg` executable, writes manifest to `%LOCALAPPDATA%\MediaGrabberDev\`).
+- See `docs/native-messaging.md` for reference.
+
+## FFmpeg
+
+Not bundled in the repo (gitignored). The CoApp looks for it at:
+1. `coapp/ffmpeg/{win|mac|linux}/ffmpeg[.exe]` (development)
+2. `{cwd}/ffmpeg/ffmpeg[.exe]` (production)
+3. System `PATH` (fallback)
+
+Place the binary manually before downloads will work. `ffprobe` is expected alongside `ffmpeg`.
+
+## got (HTTP client)
+
+`coapp/src/downloads.ts` uses `got` v12+ which is **ESM-only**, but the CoApp is CommonJS. A `new Function('specifier', 'return import(specifier)')` wrapper prevents TypeScript from rewriting `import()` into `require()` (which would throw `ERR_REQUIRE_ESM`). Do not remove this wrapper.
 
 ## Working with Agent-Plan
 
-- Tasks are `.md` files with subtasks, implementation details, and test criteria
-- When implementing a task, read the full task file and the parent epic file
-- Update task status to `IP` when starting, `DN` when complete
-- Update `Last updated` timestamp in epic and task files when modifying
-- Append changelog entry when changing task/epic status
+Tasks are `.md` files in `agent-plan/tasks/{EP-XX-epic-name}/T-NN-name.md`. Epics are in `agent-plan/epics/`. Master list: `agent-plan/EPICS.md`.
 
-## Native Messaging Protocol (Chrome/Edge)
+- Read the full task file and parent epic before implementing.
+- Update task status to `IP` (in progress) when starting, `DN` (done) when complete.
+- Update `Last updated` timestamp in epic and task files when modifying.
+- Append changelog entries to `agent-plan/CHANGELOG.md` when changing task/epic status.
 
-Messages are length-prefixed binary JSON:
-- 4-byte little-endian uint32 (message length)
-- UTF-8 JSON message
+## Key Technical Decisions
 
-This is the same protocol VDH uses. See `docs/native-messaging.md` for details.
-
-## No Build Yet
-
-No `extension/` or `coapp/` directories exist — these are planned. Do not look for source code that isn't there.
+| Decision | Value |
+|----------|-------|
+| Manifest V3 | Mandatory for Chrome Web Store |
+| Background | Service Worker (not persistent page) |
+| Native Messaging | 4-byte length prefix + JSON (weh#rpc) |
+| FFmpeg | Bundled with CoApp (not in repo) |
+| Language | TypeScript throughout |

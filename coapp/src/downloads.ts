@@ -1,208 +1,138 @@
-// Download Manager
-// Manages active downloads and tracks progress
+// Download Manager — VDH-style RPC handlers
+// Registers: downloads.download, downloads.search, downloads.cancel
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { FFmpegConverter, FFmpegProgress } from './converter';
+import * as os from 'os';
+import rpc from './rpc';
 
-export interface Download {
-  id: string;
-  url: string;
-  outputPath: string;
-  status: 'pending' | 'downloading' | 'complete' | 'failed' | 'cancelled';
-  progress: FFmpegProgress;
-  error?: string;
-  startedAt: Date;
-  completedAt?: Date;
-}
-
-export interface DownloadOptions {
-  url: string;
-  outputDir: string;
-  filename?: string;
-  quality?: string;
-  format?: 'mp4' | 'webm' | 'mkv';
-}
-
-export class DownloadManager {
-  private downloads: Map<string, Download>;
-  private ffmpeg: FFmpegConverter;
-  private activeProcesses: Map<string, any>;
-  
-  constructor(ffmpeg: FFmpegConverter) {
-    this.downloads = new Map();
-    this.ffmpeg = ffmpeg;
-    this.activeProcesses = new Map();
+// got 12+ is ESM-only; lazy-load via native dynamic import so this CJS
+// module can use it. The Function wrapper prevents TypeScript from
+// rewriting import() into require() (which would throw ERR_REQUIRE_ESM).
+const nativeImport = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<any>;
+let _got: any;
+async function getGot(): Promise<any> {
+  if (!_got) {
+    _got = (await nativeImport('got')).default;
   }
-  
-  /**
-   * Start a new download
-   */
-  async startDownload(options: DownloadOptions): Promise<string> {
-    const downloadId = this.generateId();
-    
-    // Ensure output directory exists
-    if (!fs.existsSync(options.outputDir)) {
-      fs.mkdirSync(options.outputDir, { recursive: true });
+  return _got;
+}
+
+const defaultDownloadFolder = path.join(os.homedir(), 'Downloads');
+
+let currentDownloadId = 0;
+const downloads: Record<number, any> = {};
+
+function cleanupEntry(downloadId: number): void {
+  setTimeout(() => { delete downloads[downloadId]; }, 60000);
+}
+
+rpc.listen({
+  'downloads.download': async (options: any = {}) => {
+    const got = await getGot();
+
+    const filename = path.join(
+      options.directory || defaultDownloadFolder,
+      options.filename || 'download'
+    );
+
+    const dir = path.dirname(filename);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
-    
-    // Determine output filename
-    const filename = options.filename || this.generateFilename(options.url, options.format);
-    const outputPath = path.join(options.outputDir, filename);
-    
-    const download: Download = {
-      id: downloadId,
-      url: options.url,
-      outputPath,
-      status: 'pending',
-      progress: { percent: 0, outTimeMs: '0', frame: 0, fps: 0, bitrate: '', totalSize: 0, speed: '' },
-      startedAt: new Date()
+
+    const dlOptions: any = {
+      rejectUnauthorized: !!options.rejectUnauthorized,
+      headers: {}
     };
-    
-    this.downloads.set(downloadId, download);
-    
-    // Start download asynchronously
-    this.executeDownload(downloadId, options).catch(err => {
-      this.updateDownloadStatus(downloadId, 'failed', undefined, err.message);
+    (options.headers || []).forEach((header: any) => {
+      dlOptions.headers[header.name] = header.value;
     });
-    
-    return downloadId;
-  }
-  
-  /**
-   * Cancel an active download
-   */
-  cancelDownload(downloadId: string): void {
-    const process = this.activeProcesses.get(downloadId);
-    if (process) {
-      process.kill('SIGTERM');
-      this.activeProcesses.delete(downloadId);
-      this.updateDownloadStatus(downloadId, 'cancelled');
-    }
-  }
-  
-  /**
-   * Get download status
-   */
-  getDownload(downloadId: string): Download | undefined {
-    return this.downloads.get(downloadId);
-  }
-  
-  /**
-   * Get all downloads
-   */
-  getAllDownloads(): Download[] {
-    return Array.from(this.downloads.values());
-  }
-  
-  /**
-   * Remove a completed download from tracking
-   */
-  removeDownload(downloadId: string): void {
-    this.downloads.delete(downloadId);
-  }
-  
-  private async executeDownload(downloadId: string, options: DownloadOptions): Promise<void> {
-    this.updateDownloadStatus(downloadId, 'downloading');
-    
-    try {
-      const isHLS = options.url.includes('.m3u8');
-      const isDASH = options.url.includes('.mpd');
-      
-      if (isHLS) {
-        await this.ffmpeg.downloadHLS({
-          inputUrl: options.url,
-          outputPath: this.downloads.get(downloadId)!.outputPath,
-          quality: options.quality,
-          format: options.format,
-          onProgress: (progress) => this.updateProgress(downloadId, progress)
+
+    const downloadId = ++currentDownloadId;
+    const stream = got.stream(options.url, dlOptions);
+
+    downloads[downloadId] = {
+      stream,
+      totalBytes: 0,
+      bytesReceived: 0,
+      url: options.url,
+      filename,
+      state: 'in_progress',
+      error: null
+    };
+
+    stream.on('response', (response: any) => {
+      const contentLength = response.headers['content-length'];
+      if (contentLength) {
+        downloads[downloadId].totalBytes = parseInt(contentLength, 10);
+        response.on('data', (data: Buffer) => {
+          downloads[downloadId].bytesReceived += data.length;
         });
-      } else if (isDASH) {
-        await this.ffmpeg.downloadDASH({
-          inputUrl: options.url,
-          outputPath: this.downloads.get(downloadId)!.outputPath,
-          quality: options.quality,
-          format: options.format,
-          onProgress: (progress) => this.updateProgress(downloadId, progress)
-        });
-      } else {
-        // Direct file download
-        await this.downloadDirect(options);
       }
-      
-      this.updateDownloadStatus(downloadId, 'complete');
-    } catch (error) {
-      this.updateDownloadStatus(downloadId, 'failed', undefined, error.message);
-    }
-  }
-  
-  private async downloadDirect(options: DownloadOptions): Promise<void> {
-    // Use fetch to download direct files
-    const https = require('https');
-    const http = require('http');
-    const urlModule = require('url');
-    
-    const download = Array.from(this.downloads.values()).find(d => d.url === options.url);
-    if (!download) return;
-    
-    const urlParsed = urlModule.parse(options.url);
-    const client = urlParsed.protocol === 'https:' ? https : http;
-    
-    return new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(download.outputPath);
-      
-      client.get(options.url, (response: any) => {
-        const total = parseInt(response.headers['content-length'] || '0');
-        let downloaded = 0;
-        
-        response.on('data', (chunk: Buffer) => {
-          downloaded += chunk.length;
-          const percent = total > 0 ? (downloaded / total) * 100 : 0;
-          this.updateProgress(download.id, { percent, outTimeMs: '0', frame: 0, fps: 0, bitrate: '', totalSize: 0, speed: '' });
-        });
-        
-        response.pipe(file);
-        
-        file.on('finish', () => {
-          file.close();
-          resolve();
-        });
-      }).on('error', (err: Error) => {
-        fs.unlink(download.outputPath, () => {});
-        reject(err);
-      });
     });
-  }
-  
-  private updateProgress(downloadId: string, progress: FFmpegProgress): void {
-    const download = this.downloads.get(downloadId);
-    if (download) {
-      download.progress = progress;
+
+    stream.on('error', (error: any) => {
+      const entry = downloads[downloadId];
+      if (!entry) return;
+      // ECONNRESET after receiving data usually means the server closed
+      // the connection after a complete transfer — treat as complete.
+      if (error.code === 'ECONNRESET' && entry.bytesReceived > 0) {
+        entry.state = 'complete';
+      } else {
+        entry.state = 'interrupted';
+        entry.error = error.message || String(error);
+        rpc.call('downloadError', downloadId, entry.error).catch(() => {});
+      }
+      cleanupEntry(downloadId);
+    });
+
+    const fileStream = fs.createWriteStream(filename);
+    stream.pipe(fileStream)
+      .on('finish', () => {
+        const entry = downloads[downloadId];
+        if (entry && entry.state === 'in_progress') {
+          entry.state = 'complete';
+          rpc.call('downloadComplete', downloadId, filename).catch(() => {});
+        }
+        cleanupEntry(downloadId);
+      })
+      .on('error', (err: Error) => {
+        const entry = downloads[downloadId];
+        if (entry) {
+          entry.state = 'interrupted';
+          entry.error = err.message || String(err);
+          rpc.call('downloadError', downloadId, entry.error).catch(() => {});
+        }
+        cleanupEntry(downloadId);
+      });
+
+    return downloadId;
+  },
+
+  'downloads.search': (query: any = {}) => {
+    const entry = downloads[query.id];
+    if (entry) {
+      return [{
+        totalBytes: entry.totalBytes,
+        bytesReceived: entry.bytesReceived,
+        url: entry.url,
+        filename: entry.filename,
+        state: entry.state,
+        error: entry.error
+      }];
+    }
+    return [];
+  },
+
+  'downloads.cancel': (downloadId: number) => {
+    const entry = downloads[downloadId];
+    if (entry && entry.state === 'in_progress') {
+      entry.state = 'interrupted';
+      entry.error = 'Aborted';
+      try { entry.stream.destroy(); } catch { /* already destroyed */ }
     }
   }
-  
-  private updateDownloadStatus(
-    downloadId: string,
-    status: Download['status'],
-    progress?: FFmpegProgress,
-    error?: string
-  ): void {
-    const download = this.downloads.get(downloadId);
-    if (download) {
-      download.status = status;
-      if (progress) download.progress = progress;
-      if (error) download.error = error;
-      if (status === 'complete') download.completedAt = new Date();
-    }
-  }
-  
-  private generateId(): string {
-    return `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-  
-  private generateFilename(url: string, format?: string): string {
-    const ext = format || 'mp4';
-    const timestamp = Date.now();
-    return `video_${timestamp}.${ext}`;
-  }
-}
+});
+
+console.error('[MediaGrabber CoApp] Downloads module loaded (default folder: %s)', defaultDownloadFolder);

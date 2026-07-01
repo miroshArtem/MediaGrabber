@@ -13,18 +13,12 @@ export interface M3U8StreamInfo {
 export interface ParsedM3U8 {
   type: 'master' | 'media';
   variants: M3U8StreamInfo[];
+  childUrls?: string[];
   segments?: string[];
   duration?: number;
 }
 
 export class M3U8ParserWrapper {
-  private parser: any;
-  
-  constructor() {
-    // Dynamic import of m3u8-parser
-    this.parser = null;
-  }
-  
   /**
    * Fetch and parse an M3U8 playlist from URL
    */
@@ -38,13 +32,18 @@ export class M3U8ParserWrapper {
    * Parse an M3U8 playlist string and extract stream information
    */
   static parse(manifest: string, baseUrl?: string): ParsedM3U8 {
+    if (!manifest.includes('#EXTM3U')) {
+      return { type: 'media', variants: [], segments: [], duration: undefined };
+    }
     // Use regex-based parsing since m3u8-parser may not be available in browser
     const lines = manifest.split('\n');
     
     const variants: M3U8StreamInfo[] = [];
+    const childUrls: string[] = [];
     const segments: string[] = [];
     let isMaster = false;
     let targetDuration = 0;
+    let totalDuration = 0;
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -58,12 +57,26 @@ export class M3U8ParserWrapper {
         if (playlistUrl && !playlistUrl.startsWith('#') && baseUrl) {
           variant.url = M3U8ParserWrapper.resolveUrl(playlistUrl, baseUrl);
           variants.push(variant);
+          childUrls.push(variant.url);
           i++; // Skip next line
+        }
+      }
+
+      // Alternate audio/subtitle rendition playlists referenced by the master.
+      if (line.startsWith('#EXT-X-MEDIA:')) {
+        isMaster = true;
+        const uriMatch = line.match(/URI="([^"]+)"/);
+        if (uriMatch && baseUrl) {
+          childUrls.push(M3U8ParserWrapper.resolveUrl(uriMatch[1], baseUrl));
         }
       }
       
       // Media playlist - segment
       if (line.includes('EXTINF') && !line.includes('EXT-X-STREAM-INF')) {
+        const durationMatch = line.match(/EXTINF:([\d.]+)/);
+        if (durationMatch) {
+          totalDuration += parseFloat(durationMatch[1]);
+        }
         const segmentUrl = lines[i + 1]?.trim();
         if (segmentUrl && !segmentUrl.startsWith('#') && baseUrl) {
           segments.push(M3U8ParserWrapper.resolveUrl(segmentUrl, baseUrl));
@@ -84,8 +97,9 @@ export class M3U8ParserWrapper {
     return {
       type: isMaster ? 'master' : 'media',
       variants,
+      childUrls: childUrls.length > 0 ? Array.from(new Set(childUrls)) : undefined,
       segments: segments.length > 0 ? segments : undefined,
-      duration: segments.length > 0 ? segments.length * targetDuration : undefined
+      duration: segments.length > 0 ? totalDuration || segments.length * targetDuration : undefined
     };
   }
   
@@ -127,18 +141,11 @@ export class M3U8ParserWrapper {
    * Resolve relative URL to absolute
    */
   static resolveUrl(relativeUrl: string, baseUrl: string): string {
-    if (relativeUrl.startsWith('http')) {
+    try {
+      return new URL(relativeUrl, baseUrl).href;
+    } catch {
       return relativeUrl;
     }
-    
-    if (relativeUrl.startsWith('/')) {
-      const url = new URL(baseUrl);
-      return `${url.origin}${relativeUrl}`;
-    }
-    
-    // Relative path
-    const base = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
-    return base + relativeUrl;
   }
   
   /**

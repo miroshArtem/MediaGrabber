@@ -31,6 +31,8 @@ let port: chrome.runtime.Port;
 let selectedVideo: VideoInfo | null = null;
 let selectedQualityIndex = 0;
 let currentQualities: QualityOption[] = [];
+let activeTabId: number | null = null;
+let currentDownloadId: string | null = null;
 
 // Connect to background script
 function initPopup(): void {
@@ -49,7 +51,7 @@ function initPopup(): void {
         }
         break;
       case 'DOWNLOAD_PROGRESS':
-        updateProgressUI(msg);
+        updateProgressUI(msg.progress || msg);
         break;
       case 'DOWNLOAD_COMPLETE':
         showDownloadComplete();
@@ -72,7 +74,21 @@ function initPopup(): void {
 document.addEventListener('DOMContentLoaded', () => {
   initPopup();
   setupEventListeners();
+  initializePopupState();
 });
+
+async function initializePopupState(): Promise<void> {
+  activeTabId = await getActiveTabId();
+  requestMediaList();
+}
+
+async function getActiveTabId(): Promise<number | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      resolve(tabs[0]?.id ?? null);
+    });
+  });
+}
 
 function setupEventListeners(): void {
   // Refresh button
@@ -107,7 +123,7 @@ function setupEventListeners(): void {
 
 function requestMediaList(): void {
   if (port) {
-    port.postMessage({ type: 'GET_MEDIA' });
+    port.postMessage({ type: 'GET_MEDIA', tabId: activeTabId });
     updateStatus('Checking for media...');
   }
 }
@@ -132,8 +148,12 @@ function renderMediaList(videos: VideoInfo[]): void {
   const mediaDetails = document.getElementById('media-details')!;
   const downloadSection = document.getElementById('download-section')!;
   const container = document.getElementById('videos')!;
+  const timedVideos = videos.filter(
+    (video) => typeof video.duration === 'number' && isFinite(video.duration) && video.duration > 0
+  );
+  const displayVideos = timedVideos.length > 0 ? timedVideos : videos;
   
-  if (!videos || videos.length === 0) {
+  if (!displayVideos || displayVideos.length === 0) {
     emptyState.classList.remove('hidden');
     videoList.classList.add('hidden');
     mediaDetails.classList.add('hidden');
@@ -147,12 +167,12 @@ function renderMediaList(videos: VideoInfo[]): void {
   
   container.innerHTML = '';
   
-  videos.forEach((video, index) => {
+  displayVideos.forEach((video, index) => {
     const videoEl = createMediaItem(video, index);
     container.appendChild(videoEl);
   });
   
-  updateStatus(`${videos.length} media found`, 'success');
+  updateStatus(`${displayVideos.length} media found`, 'success');
 }
 
 /**
@@ -207,8 +227,8 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
   // Convert qualities to options
   currentQualities = video.qualities.map(q => ({
     label: getQualityLabel(q.height),
-    bandwidth: q.bitrate ? q.bitrate * 1000 : 0,
-    bandwidthLabel: q.bitrate ? formatBandwidth(q.bitrate * 1000) : 'Unknown',
+    bandwidth: q.bitrate || 0,
+    bandwidthLabel: q.bitrate ? formatBandwidth(q.bitrate) : 'Unknown',
     resolution: q.width && q.height ? `${q.width}x${q.height}` : undefined,
     url: q.url,
     height: q.height
@@ -339,7 +359,12 @@ function startDownload(video: VideoInfo, quality: QualityOption): void {
       type: 'DOWNLOAD',
       video: {
         ...video,
-        url: quality.url
+        url: quality.url,
+        qualities: quality.height ? [{
+          height: quality.height,
+          bitrate: quality.bandwidth,
+          url: quality.url
+        }] : []
       },
       filename: filename
     });
@@ -366,22 +391,56 @@ function showDownloadingUI(): void {
 }
 
 function showDownloadStarted(downloadId: string): void {
+  currentDownloadId = downloadId;
   updateStatus('Download started...', 'info');
 }
 
-function updateProgressUI(progress: { percent: number; speed?: number; eta?: number }): void {
+function updateProgressUI(progress: any): void {
   const fill = document.getElementById('progress-fill');
-  const percent = document.getElementById('progress-percent');
-  const speed = document.getElementById('progress-speed');
-  const eta = document.getElementById('progress-eta');
-  
-  if (fill) fill.style.width = `${progress.percent}%`;
-  if (percent) percent.textContent = `${Math.round(progress.percent)}%`;
-  if (speed && progress.speed) speed.textContent = formatSpeed(progress.speed);
-  if (eta && progress.eta) eta.textContent = formatETA(progress.eta);
+  const percentEl = document.getElementById('progress-percent');
+  const speedEl = document.getElementById('progress-speed');
+  const etaEl = document.getElementById('progress-eta');
+
+  const percent = typeof progress.percent === 'number' ? progress.percent : 0;
+  const hasMeasuredProgress = percent > 0;
+
+  if (fill) {
+    if (hasMeasuredProgress) {
+      fill.classList.remove('indeterminate');
+      fill.style.width = `${Math.min(100, percent)}%`;
+    } else {
+      fill.classList.add('indeterminate');
+      fill.style.width = '35%';
+    }
+  }
+
+  if (percentEl) {
+    percentEl.textContent = hasMeasuredProgress ? `${Math.round(percent)}%` : '...';
+  }
+
+  // Handle FFmpeg speed (string like "1.5x") vs direct download (bytes)
+  if (speedEl && progress.speed) {
+    if (typeof progress.speed === 'string') {
+      speedEl.textContent = progress.speed;
+    } else if (typeof progress.speed === 'number' && progress.speed > 0) {
+      speedEl.textContent = formatSpeed(progress.speed);
+    }
+  }
+
+  // Handle direct download byte progress
+  if (speedEl && progress.bytesReceived !== undefined && progress.totalBytes > 0) {
+    const mbReceived = (progress.bytesReceived / 1000000).toFixed(1);
+    const mbTotal = (progress.totalBytes / 1000000).toFixed(1);
+    speedEl.textContent = `${mbReceived} / ${mbTotal} MB`;
+  }
+
+  if (etaEl && progress.eta) {
+    etaEl.textContent = formatETA(progress.eta);
+  }
 }
 
 function showDownloadComplete(): void {
+  currentDownloadId = null;
   updateStatus('Download complete!', 'success');
   
   const downloadProgress = document.getElementById('download-progress')!;
@@ -393,34 +452,45 @@ function showDownloadComplete(): void {
   // Auto close after 2 seconds
   setTimeout(() => {
     resetUI();
+    requestMediaList();
   }, 2000);
 }
 
 function cancelDownload(): void {
-  if (port) {
-    port.postMessage({ type: 'CANCEL_DOWNLOAD' });
+  if (port && currentDownloadId) {
+    port.postMessage({ type: 'CANCEL_DOWNLOAD', downloadId: currentDownloadId });
   }
+  currentDownloadId = null;
   resetUI();
   updateStatus('Download cancelled', 'error');
 }
 
 function resetUI(): void {
+  currentDownloadId = null;
   const emptyState = document.getElementById('empty-state')!;
+  const videoList = document.getElementById('video-list')!;
+  const mediaDetails = document.getElementById('media-details')!;
+  const downloadSection = document.getElementById('download-section')!;
   const downloadProgress = document.getElementById('download-progress')!;
   const error = document.getElementById('error')!;
   const fill = document.getElementById('progress-fill');
   
-  emptyState.classList.remove('hidden');
+  emptyState.classList.add('hidden');
+  videoList.classList.remove('hidden');
+  mediaDetails.classList.add('hidden');
+  downloadSection.classList.add('hidden');
   downloadProgress.classList.add('hidden');
   error.classList.add('hidden');
   
   if (fill) {
+    fill.classList.remove('indeterminate');
     fill.style.width = '0%';
     fill.style.background = 'linear-gradient(90deg, #2196f3, #4caf50)';
   }
 }
 
 function showError(message: string): void {
+  currentDownloadId = null;
   const errorEl = document.getElementById('error')!;
   const errorMsgEl = document.getElementById('error-message')!;
   
@@ -478,6 +548,7 @@ function formatBandwidth(bps: number): string {
 }
 
 function formatSpeed(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec <= 0) return '';
   if (bytesPerSec > 1000000) {
     return `${(bytesPerSec / 1000000).toFixed(1)} MB/s`;
   }

@@ -1,104 +1,320 @@
 // MediaGrabber Service Worker (Background Script)
-// Manifest V3 uses Service Workers instead of persistent background pages
+// Manifest V3 — webRequest, media detection, download orchestration.
 
 import { NativeClient } from './lib/native-client';
 import { VideoInfo } from './lib/types';
+import { M3U8ParserWrapper } from './lib/m3u8-parser';
+
+const nativeClient = new NativeClient();
 
 // Media storage by tabId
 const mediaByTab = new Map<number, VideoInfo[]>();
+const interceptedMediaByTab = new Map<number, Set<string>>();
 
-// Native messaging client
-const nativeClient = new NativeClient();
-
-// CoApp connection state
-let coappConnected = false;
+// Active downloads: key = downloadKey, value = tracking info
+const activeDownloads = new Map<string, {
+  pid?: number;
+  downloadId?: number;
+  type: 'convert' | 'direct';
+  video?: VideoInfo;
+  directory: string;
+  filename: string;
+}>();
 
 // Popup connections
 const popupPorts = new Set<chrome.runtime.Port>();
 
-// Connect to CoApp on startup
+// Default download directory (sent by CoApp or fallback)
+let defaultDownloadDir = '';
+let coappPlatform = '';
+
+// Register handlers for CoApp → extension calls (push progress)
+nativeClient.listen({
+  // FFmpeg progress push: (progressTime, currentSeconds, info)
+  convertOutput: (progressTime: number, currentSeconds: number, info: any) => {
+    for (const [key, dl] of activeDownloads) {
+      if (dl.type !== 'convert' || !dl.video) continue;
+      const duration = dl.video.duration || 0;
+      const percent = duration > 0 ? Math.min(100, (currentSeconds / duration) * 100) : 0;
+      popupPorts.forEach(port => {
+        port.postMessage({
+          type: 'DOWNLOAD_PROGRESS',
+          downloadId: key,
+          progress: { percent, currentSeconds, speed: info.speed || '', bitrate: info.bitrate || '' }
+        });
+      });
+    }
+  },
+
+  // CoApp tells us the ffmpeg PID for a convert operation
+  convertStartNotification: (startHandler: any, pid: number) => {
+    const keyedDownload = activeDownloads.get(String(startHandler));
+    if (keyedDownload && keyedDownload.type === 'convert') {
+      keyedDownload.pid = pid;
+      return;
+    }
+
+    // Fallback for older CoApp calls without startHandler.
+    for (const dl of activeDownloads.values()) {
+      if (dl.type === 'convert' && dl.pid === undefined) {
+        dl.pid = pid;
+        break;
+      }
+    }
+  },
+
+  // Direct download complete (pushed by CoApp)
+  downloadComplete: (downloadId: number, outputPath: string) => {
+    const key = `direct_${downloadId}`;
+    const dl = activeDownloads.get(key);
+    if (dl) {
+      popupPorts.forEach(port => {
+        port.postMessage({ type: 'DOWNLOAD_COMPLETE', downloadId: key, outputPath });
+      });
+      activeDownloads.delete(key);
+    }
+  },
+
+  // Direct download error (pushed by CoApp)
+  downloadError: (downloadId: number, error: string) => {
+    const key = `direct_${downloadId}`;
+    popupPorts.forEach(port => {
+      port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: key, error });
+    });
+    activeDownloads.delete(key);
+  }
+});
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[MediaGrabber] Extension installed');
-  connectCoApp();
 });
 
-// Service worker lifecycle - keep alive for native messaging
 chrome.runtime.onStartup.addListener(() => {
   console.log('[MediaGrabber] Service worker starting');
-  connectCoApp();
 });
 
-/**
- * Connect to CoApp via native messaging
- */
-function connectCoApp(): void {
-  nativeClient.connect()
-    .then(() => {
-      coappConnected = true;
-      console.log('[MediaGrabber] Connected to CoApp');
-    })
-    .catch((err) => {
-      coappConnected = false;
-      console.error('[MediaGrabber] Failed to connect to CoApp:', err);
-      // Reconnect after delay
-      setTimeout(connectCoApp, 5000);
-    });
+// --- Media detection via webRequest (works in MV3 service worker) ---
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(details.url);
+    } catch {
+      return;
+    }
+
+    if (!isMediaUrl(parsedUrl)) return;
+
+    void handleInterceptedMedia(details.tabId, details.url);
+  },
+  { urls: ['<all_urls>'] }
+);
+
+function isMediaUrl(url: URL): boolean {
+  // Only http(s) — exclude blob:, data:, chrome-extension:, ws:, etc.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+
+  const path = url.pathname.toLowerCase();
+
+  // HLS
+  if (path.endsWith('.m3u8') || path.includes('.m3u8')) return true;
+  // DASH
+  if (path.endsWith('.mpd') || path.includes('.mpd')) return true;
+  // Direct video files
+  if (path.endsWith('.mp4')) return true;
+  if (path.endsWith('.webm')) return true;
+
+  // Do NOT match .ts (TypeScript files) or /manifest (web app manifests)
+  return false;
 }
 
-// Handle messages from content script and popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  handleMessage(message, sender)
-    .then(sendResponse)
-    .catch((err) => sendResponse({ error: err.message }));
-  return true; // Keep channel open for async response
-});
+function getMediaType(url: string): VideoInfo['type'] {
+  const path = new URL(url).pathname.toLowerCase();
+  if (path.includes('.m3u8')) return 'hls';
+  if (path.includes('.mpd')) return 'dash';
+  if (path.endsWith('.mp4')) return 'mp4';
+  if (path.endsWith('.webm')) return 'webm';
+  return 'direct';
+}
 
-/**
- * Handle popup connections via chrome.runtime.onConnect
- */
+function generateVideoId(url: string): string {
+  // Safe base64 for non-ASCII URLs
+  try {
+    return `video_${btoa(encodeURIComponent(url)).substring(0, 20)}_${Date.now()}`;
+  } catch {
+    return `video_${Date.now()}_${Math.random().toString(36).substring(2, 12)}`;
+  }
+}
+
+function mergeQualities(a: VideoInfo['qualities'] = [], b: VideoInfo['qualities'] = []): VideoInfo['qualities'] {
+  const merged = new Map<string, VideoInfo['qualities'][number]>();
+  [...a, ...b].forEach((quality) => {
+    if (quality?.url && !merged.has(quality.url)) {
+      merged.set(quality.url, quality);
+    }
+  });
+  return Array.from(merged.values());
+}
+
+function mergeChildUrls(a?: string[], b?: string[]): string[] | undefined {
+  const merged = Array.from(new Set([...(a || []), ...(b || [])]));
+  return merged.length > 0 ? merged : undefined;
+}
+
+function commitVideos(tabId: number, videos: VideoInfo[]): void {
+  mediaByTab.set(tabId, videos);
+  chrome.action.setBadgeText({ tabId, text: String(videos.length) });
+  chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' });
+  notifyPopups(tabId);
+}
+
+function upsertVideo(tabId: number, video: VideoInfo): void {
+  let videos = mediaByTab.get(tabId) || [];
+
+  if (video.type === 'hls') {
+    const childUrls = new Set([
+      ...(video.qualities || []).map((q) => q.url),
+      ...(video.childUrls || [])
+    ]);
+
+    // Variant playlists are implementation details of a master HLS playlist.
+    // Keep only the master entry that owns the quality list.
+    const belongsToExistingMaster = videos.some((existing) =>
+      existing.type === 'hls' &&
+      existing.url !== video.url &&
+      (
+        existing.qualities?.some((quality) => quality.url === video.url) ||
+        existing.childUrls?.includes(video.url)
+      )
+    );
+
+    if (belongsToExistingMaster) {
+      return;
+    }
+
+    if (childUrls.size > 0) {
+      videos = videos.filter((existing) =>
+        !(existing.type === 'hls' && existing.url !== video.url && childUrls.has(existing.url))
+      );
+    }
+
+  }
+
+  const existingIndex = videos.findIndex((v) => v.url === video.url);
+
+  if (existingIndex >= 0) {
+    videos[existingIndex] = {
+      ...videos[existingIndex],
+      ...video,
+      qualities: video.qualities?.length ? video.qualities : videos[existingIndex].qualities,
+      childUrls: video.childUrls?.length ? video.childUrls : videos[existingIndex].childUrls
+    };
+  } else {
+    videos.push(video);
+  }
+
+  commitVideos(tabId, videos);
+}
+
+async function getTabTitle(tabId: number): Promise<string> {
+  return new Promise((resolve) => {
+    chrome.tabs.get(tabId, (tab) => {
+      resolve(tab?.title || 'Detected media');
+    });
+  });
+}
+
+async function handleInterceptedMedia(tabId: number, url: string): Promise<void> {
+  const seen = interceptedMediaByTab.get(tabId) || new Set<string>();
+  if (seen.has(url)) return;
+  seen.add(url);
+  interceptedMediaByTab.set(tabId, seen);
+
+  const title = await getTabTitle(tabId);
+  const type = getMediaType(url);
+
+  let qualities: VideoInfo['qualities'] = [];
+  let childUrls: string[] | undefined;
+  let duration: number | undefined;
+
+  if (type === 'hls') {
+    try {
+      const parsed = await M3U8ParserWrapper.fetchAndParse(url);
+      duration = parsed.duration;
+      childUrls = parsed.childUrls;
+      qualities = parsed.variants.map((variant) => ({
+        height: variant.height || 0,
+        width: variant.width,
+        bitrate: variant.bandwidth,
+        url: variant.url
+      }));
+
+      // Fallback: fetch media playlist for duration if master had none
+      if (!duration && parsed.variants.length > 0) {
+        try {
+          const mediaPlaylist = await M3U8ParserWrapper.fetchAndParse(parsed.variants[0].url);
+          duration = mediaPlaylist.duration;
+        } catch {
+          // ignore
+        }
+      }
+    } catch (error) {
+      console.warn('[MediaGrabber] Failed to parse HLS manifest:', error);
+    }
+  }
+
+  upsertVideo(tabId, {
+    id: generateVideoId(url),
+    title,
+    url,
+    type,
+    qualities,
+    childUrls,
+    duration
+  });
+
+  console.log('[MediaGrabber] Intercepted media:', url, type);
+}
+
+// --- Popup communication ---
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'popup') {
     popupPorts.add(port);
-    
+
     port.onMessage.addListener((msg) => {
       handlePopupMessage(port, msg);
     });
-    
+
     port.onDisconnect.addListener(() => {
       popupPorts.delete(port);
-      console.log('[MediaGrabber] Popup disconnected');
-    });
-    
-    // Send current media for active tab when popup opens
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        const videos = mediaByTab.get(tabs[0].id) || [];
-        port.postMessage({ type: 'MEDIA_LIST', videos });
-      }
     });
   }
 });
 
-/**
- * Handle messages from popup
- */
 function handlePopupMessage(port: chrome.runtime.Port, msg: any): void {
   switch (msg.type) {
     case 'GET_MEDIA':
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          const videos = mediaByTab.get(tabs[0].id) || [];
+      if (typeof msg.tabId === 'number') {
+        const videos = mediaByTab.get(msg.tabId) || [];
+        port.postMessage({ type: 'MEDIA_LIST', videos });
+      } else {
+        chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+          const videos = tabs[0]?.id ? (mediaByTab.get(tabs[0].id) || []) : [];
           port.postMessage({ type: 'MEDIA_LIST', videos });
-        }
-      });
+        });
+      }
       break;
-    
+
     case 'DOWNLOAD':
       startDownload(msg.video, msg.filename)
         .then(result => port.postMessage({ type: 'DOWNLOAD_STARTED', ...result }))
         .catch(err => port.postMessage({ type: 'ERROR', message: err.message }));
       break;
-    
+
     case 'CANCEL_DOWNLOAD':
       handleCancelDownload(msg.downloadId)
         .then(result => port.postMessage({ type: 'DOWNLOAD_CANCELLED', ...result }))
@@ -107,9 +323,6 @@ function handlePopupMessage(port: chrome.runtime.Port, msg: any): void {
   }
 }
 
-/**
- * Notify all popups when new media is detected
- */
 function notifyPopups(tabId: number): void {
   const videos = mediaByTab.get(tabId);
   if (videos) {
@@ -119,188 +332,184 @@ function notifyPopups(tabId: number): void {
   }
 }
 
-/**
- * Handle incoming messages
- */
+// --- Download orchestration ---
+
+async function ensureCoAppConnected(): Promise<void> {
+  if (!nativeClient.connected) {
+    await nativeClient.connect();
+  }
+
+  if (!defaultDownloadDir) {
+    try {
+      const info = await nativeClient.info();
+      defaultDownloadDir = info?.downloadDir || '';
+      coappPlatform = info?.platform || '';
+    } catch (error) {
+      console.warn('[MediaGrabber] Failed to read CoApp info:', error);
+    }
+  }
+}
+
+function sanitizeFilename(name: string): string {
+  const sanitized = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
+  return sanitized || `video_${Date.now()}.mp4`;
+}
+
+function joinOutputPath(directory: string, filename: string): string {
+  if (!directory) return filename;
+  const separator = coappPlatform === 'win32' ? '\\' : '/';
+  return `${directory.replace(/[\\/]$/, '')}${separator}${filename}`;
+}
+
+async function startDownload(video: VideoInfo, filename?: string): Promise<any> {
+  await ensureCoAppConnected();
+
+  const type = getMediaType(video.url);
+  const outFilename = sanitizeFilename(filename || `${video.title || 'video'}.mp4`);
+  const directory = defaultDownloadDir;
+
+  if (type === 'hls' || type === 'dash') {
+    // FFmpeg convert path
+    const downloadKey = `convert_${Date.now()}`;
+    const outputPath = joinOutputPath(directory, outFilename);
+
+    activeDownloads.set(downloadKey, {
+      type: 'convert',
+      video,
+      directory,
+      filename: outFilename
+    });
+
+    // Start ffmpeg asynchronously — progress comes via convertOutput push
+    nativeClient.convert(
+      ['-i', video.url, '-c', 'copy', '-y', outputPath],
+      { progressTime: 1000, startHandler: downloadKey }
+    ).then(result => {
+      if (result.exitCode === 0) {
+        popupPorts.forEach(port => {
+          port.postMessage({ type: 'DOWNLOAD_COMPLETE', downloadId: downloadKey, outputPath });
+        });
+      } else {
+        popupPorts.forEach(port => {
+          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: `FFmpeg exit code ${result.exitCode}: ${result.stderr}` });
+        });
+      }
+      activeDownloads.delete(downloadKey);
+    }).catch(err => {
+      popupPorts.forEach(port => {
+        port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: err.message });
+      });
+      activeDownloads.delete(downloadKey);
+    });
+
+    return { success: true, downloadId: downloadKey };
+  } else {
+    // Direct download path
+    const downloadId = await nativeClient.downloadFile({
+      url: video.url,
+      directory: directory || undefined,
+      filename: outFilename
+    });
+
+    const downloadKey = `direct_${downloadId}`;
+    activeDownloads.set(downloadKey, {
+      type: 'direct',
+      downloadId,
+      video,
+      directory,
+      filename: outFilename
+    });
+
+    // Poll for direct download progress (CoApp pushes complete/error, but we poll for bytes)
+    startDirectProgressPolling(downloadKey, downloadId, video.duration);
+
+    return { success: true, downloadId: downloadKey };
+  }
+}
+
+function startDirectProgressPolling(downloadKey: string, downloadId: number, duration?: number): void {
+  const timer = setInterval(async () => {
+    try {
+      const results = await nativeClient.searchDownloads(downloadId);
+      if (!results || results.length === 0) {
+        clearInterval(timer);
+        return;
+      }
+
+      const dl = results[0];
+      const percent = dl.totalBytes > 0 ? (dl.bytesReceived / dl.totalBytes) * 100 : 0;
+
+      popupPorts.forEach(port => {
+        port.postMessage({
+          type: 'DOWNLOAD_PROGRESS',
+          downloadId: downloadKey,
+          progress: { percent, bytesReceived: dl.bytesReceived, totalBytes: dl.totalBytes }
+        });
+      });
+
+      if (dl.state === 'complete') {
+        clearInterval(timer);
+        activeDownloads.delete(downloadKey);
+      } else if (dl.state === 'interrupted') {
+        clearInterval(timer);
+        popupPorts.forEach(port => {
+          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: dl.error || 'Download interrupted' });
+        });
+        activeDownloads.delete(downloadKey);
+      }
+    } catch {
+      // Single poll failure — don't abort, just skip this tick
+    }
+  }, 2000);
+}
+
+async function handleCancelDownload(downloadId: string): Promise<any> {
+  const dl = activeDownloads.get(downloadId);
+  if (!dl) {
+    return { success: false, error: 'Download not found' };
+  }
+
+  if (dl.type === 'convert' && dl.pid !== undefined) {
+    await nativeClient.abortConvert(dl.pid);
+  } else if (dl.type === 'direct' && dl.downloadId !== undefined) {
+    await nativeClient.cancelDownload(dl.downloadId);
+  }
+
+  activeDownloads.delete(downloadId);
+  return { success: true };
+}
+
+// Handle messages from content script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  handleMessage(message, sender)
+    .then(sendResponse)
+    .catch((err) => sendResponse({ error: err.message }));
+  return true;
+});
+
 async function handleMessage(message: any, sender: chrome.runtime.MessageSender): Promise<any> {
   switch (message.type) {
     case 'VIDEO_DETECTED':
       return handleVideoDetected(sender.tab?.id, message.video);
-    
+
     case 'GET_VIDEOS':
       return getVideosForTab(message.tabId);
-    
-    case 'DOWNLOAD_REQUEST':
-      return handleDownloadRequest(message);
-    
-    case 'GET_DOWNLOAD_PROGRESS':
-      return handleGetProgress(message.downloadId);
-    
-    case 'CANCEL_DOWNLOAD':
-      return handleCancelDownload(message.downloadId);
-    
+
     case 'PING':
       return { success: true, timestamp: Date.now() };
-    
+
     default:
       return { error: `Unknown message type: ${message.type}` };
   }
 }
 
-/**
- * Handle video detection from content script
- */
 function handleVideoDetected(tabId: number | undefined, video: VideoInfo): any {
-  if (tabId === undefined) {
-    return { error: 'No tabId' };
-  }
-  
-  // Get or create video list for tab
-  const videos = mediaByTab.get(tabId) || [];
-  
-  // Check if video already exists
-  const existingIndex = videos.findIndex(v => v.url === video.url);
-  if (existingIndex >= 0) {
-    videos[existingIndex] = video;
-  } else {
-    videos.push(video);
-  }
-  
-  mediaByTab.set(tabId, videos);
-  
-  // Update badge to show count
-  chrome.action.setBadgeText({ tabId, text: String(videos.length) });
-  chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' });
-  
+  if (tabId === undefined) return { error: 'No tabId' };
+  upsertVideo(tabId, video);
   console.log(`[MediaGrabber] Detected video on tab ${tabId}:`, video.title);
-  
-  // Notify popups of new media
-  notifyPopups(tabId);
-  
-  return { success: true, count: videos.length };
+  return { success: true, count: (mediaByTab.get(tabId) || []).length };
 }
 
-/**
- * Get videos for a specific tab
- */
 function getVideosForTab(tabId: number): any {
-  const videos = mediaByTab.get(tabId) || [];
-  return { videos };
+  return { videos: mediaByTab.get(tabId) || [] };
 }
-
-/**
- * Handle download request
- */
-async function handleDownloadRequest(request: { url: string; quality?: string; filename?: string }): Promise<any> {
-  if (!coappConnected) {
-    // Try to reconnect
-    await nativeClient.connect();
-    if (!coappConnected) {
-      return { error: 'CoApp not connected' };
-    }
-  }
-  
-  try {
-    const response = await nativeClient.sendDownloadRequest({
-      url: request.url,
-      quality: request.quality,
-      format: 'mp4',
-      filename: request.filename
-    });
-    
-    return response;
-  } catch (err) {
-    return { error: `Download failed: ${err.message}` };
-  }
-}
-
-/**
- * Start a download
- */
-async function startDownload(video: VideoInfo, filename?: string): Promise<any> {
-  if (!coappConnected) {
-    await nativeClient.connect();
-    if (!coappConnected) {
-      throw new Error('CoApp not connected');
-    }
-  }
-
-  // Set up progress notifications before starting download
-  nativeClient.onNotify('convertOutput', (progressTime: number, currentSeconds: number, info: any) => {
-    // Send progress to popup
-    popupPorts.forEach(port => {
-      port.postMessage({
-        type: 'DOWNLOAD_PROGRESS',
-        progress: {
-          timeMs: progressTime,
-          currentSeconds,
-          percent: video.duration ? (currentSeconds / video.duration) * 100 : 0,
-          ...info
-        }
-      });
-    });
-  });
-
-  nativeClient.onNotify('downloadComplete', (downloadId: string, outputPath: string) => {
-    popupPorts.forEach(port => {
-      port.postMessage({
-        type: 'DOWNLOAD_COMPLETE',
-        downloadId,
-        outputPath
-      });
-    });
-  });
-
-  nativeClient.onNotify('downloadError', (downloadId: string, error: string) => {
-    popupPorts.forEach(port => {
-      port.postMessage({
-        type: 'DOWNLOAD_ERROR',
-        downloadId,
-        error
-      });
-    });
-  });
-  
-  return nativeClient.sendDownloadRequest({
-    url: video.url,
-    quality: video.qualities?.[0]?.height?.toString(),
-    format: 'mp4',
-    filename: filename || `${video.title || 'video'}.mp4`
-  });
-}
-
-/**
- * Get download progress
- */
-async function handleGetProgress(downloadId: string): Promise<any> {
-  try {
-    const progress = await nativeClient.getProgress(downloadId);
-    return progress;
-  } catch (err) {
-    return { error: `Failed to get progress: ${err.message}` };
-  }
-}
-
-/**
- * Cancel an active download
- */
-async function handleCancelDownload(downloadId: string): Promise<any> {
-  try {
-    await nativeClient.cancelDownload(downloadId);
-    return { success: true };
-  } catch (err) {
-    return { error: `Failed to cancel: ${err.message}` };
-  }
-}
-
-// Periodic ping to keep service worker alive
-setInterval(() => {
-  if (coappConnected) {
-    chrome.runtime.sendMessage({ type: 'PING' })
-      .catch(() => {
-        // Service worker might be terminated, try to reconnect
-        coappConnected = false;
-        connectCoApp();
-      });
-  }
-}, 25000); // Every 25 seconds

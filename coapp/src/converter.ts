@@ -1,347 +1,180 @@
-// FFmpeg Converter Wrapper
-// Handles FFmpeg operations for HLS/DASH downloads and stream merging
+// FFmpeg Converter — VDH-style RPC handlers
+// Registers: convert, abortConvert, probe, info
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn as nodeSpawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import rpc from './rpc';
 
-export interface FFmpegProgress {
-  percent: number;
-  outTimeMs: string;
-  frame: number;
-  fps: number;
-  bitrate: string;
-  totalSize: number;
-  speed: string;
+const convertChildren = new Map<number, ChildProcess>();
+const to_kill = new Set<ChildProcess>();
+
+function spawn(arg0: string, argv: string[]): ChildProcess {
+  const child = nodeSpawn(arg0, argv);
+  if (child.pid) {
+    to_kill.add(child);
+    child.on('exit', () => { to_kill.delete(child); });
+  }
+  return child;
 }
 
-export interface FFmpegOptions {
-  ffmpegPath?: string;
-  progressTime?: number;
+function findFFmpeg(): string {
+  const platform = process.platform;
+  const paths = [
+    path.join(__dirname, '..', 'ffmpeg', platform === 'win32' ? 'win' : platform, 'ffmpeg' + (platform === 'win32' ? '.exe' : '')),
+    path.join(process.cwd(), 'ffmpeg', 'ffmpeg' + (platform === 'win32' ? '.exe' : '')),
+    'ffmpeg'
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'ffmpeg';
 }
 
-export interface FFmpegResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
+function findFFprobe(): string {
+  const platform = process.platform;
+  const paths = [
+    path.join(__dirname, '..', 'ffmpeg', platform === 'win32' ? 'win' : platform, 'ffprobe' + (platform === 'win32' ? '.exe' : '')),
+    path.join(process.cwd(), 'ffmpeg', 'ffprobe' + (platform === 'win32' ? '.exe' : '')),
+    'ffprobe'
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'ffprobe';
 }
 
-export class FFmpegConverter {
-  private ffmpegPath: string;
-  private currentProcess: ChildProcess | null = null;
-  
-  constructor(options: FFmpegOptions = {}) {
-    this.ffmpegPath = options.ffmpegPath || this.findFFmpeg();
-  }
-  
-  /**
-   * Download HLS stream and merge segments
-   */
-  async downloadHLS(options: {
-    inputUrl: string;
-    outputPath: string;
-    quality?: string;
-    format?: string;
-    duration?: number;
-    onProgress?: (progress: FFmpegProgress) => void;
-  }): Promise<void> {
-    const args = [
-      '-i', options.inputUrl,
-      '-c', 'copy',
-      '-y',
-      options.outputPath
-    ];
-    
-    await this.convert(args, { duration: options.duration, onProgress: options.onProgress });
-  }
-  
-  /**
-   * Download DASH stream
-   */
-  async downloadDASH(options: {
-    inputUrl: string;
-    outputPath: string;
-    quality?: string;
-    format?: string;
-    duration?: number;
-    onProgress?: (progress: FFmpegProgress) => void;
-  }): Promise<void> {
-    const args = [
-      '-i', options.inputUrl,
-      '-c', 'copy',
-      '-y',
-      options.outputPath
-    ];
-    
-    await this.convert(args, { duration: options.duration, onProgress: options.onProgress });
-  }
-  
-  private findFFmpeg(): string {
-    // Check bundled location
-    const platform = process.platform;
-    
-    const paths = [
-      // Development path
-      path.join(__dirname, '..', 'ffmpeg', platform === 'win32' ? 'win' : platform, 'ffmpeg' + (platform === 'win32' ? '.exe' : '')),
-      // Production path relative to executable
-      path.join(process.cwd(), 'ffmpeg', 'ffmpeg' + (platform === 'win32' ? '.exe' : '')),
-      // System PATH
-      'ffmpeg'
-    ];
-    
-    for (const p of paths) {
-      if (fs.existsSync(p)) {
-        return p;
-      }
+const ffmpegBin = findFFmpeg();
+const ffprobeBin = findFFprobe();
+
+const PROPS_RE = /\S+=\s*\S+/;
+const NAMEVAL_RE = /(\S+)=\s*(\S+)/;
+
+function killAll(): void {
+  to_kill.forEach((child) => {
+    try { child.kill(); } catch { /* already exited */ }
+  });
+}
+
+rpc.listen({
+  abortConvert: (pid: number) => {
+    const child = convertChildren.get(pid);
+    if (child && child.exitCode == null) {
+      try { child.stdin?.write('q'); } catch { /* stdin closed */ }
+      setTimeout(() => {
+        if (child && child.exitCode == null) {
+          try { child.kill(9); } catch { /* already exited */ }
+        }
+      }, 10000);
     }
-    
-    return 'ffmpeg'; // Fallback to system PATH
-  }
-  
-  getPath(): string {
-    return this.ffmpegPath;
-  }
-  
-  async convert(
-    args: string[],
-    options: { progressTime?: number; duration?: number; onProgress?: (progress: FFmpegProgress) => void } = {}
-  ): Promise<FFmpegResult> {
-    const { progressTime = 1000, duration, onProgress } = options;
-    
+  },
+
+  convert: async (args: string[] = ['-h'], options: any = {}) => {
+    const ffmpegBaseArgs = '-progress pipe:1 -hide_banner -loglevel error'.split(' ');
+    const fullArgs = [...ffmpegBaseArgs, ...args];
+    const child = spawn(ffmpegBin, fullArgs);
+    if (child.pid) convertChildren.set(child.pid, child);
+
+    let stderr = '';
+    child.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf8'); });
+
+    if (options.startHandler) {
+      try {
+        await rpc.call('convertStartNotification', options.startHandler, child.pid);
+      } catch { /* extension not listening */ }
+    }
+
+    let progressInfo: Record<string, string> = {};
+
+    const onLine = async (line: string): Promise<void> => {
+      const props = line.match(PROPS_RE) || [];
+      props.forEach((prop: string) => {
+        const m = NAMEVAL_RE.exec(prop);
+        if (m) progressInfo[m[1]] = m[2];
+      });
+      if (progressInfo['progress']) {
+        const info = progressInfo;
+        progressInfo = {};
+        if (typeof info['out_time_ms'] !== 'undefined') {
+          // out_time_ms is in NANOSECONDS, not milliseconds
+          const seconds = parseInt(info['out_time_ms'], 10) / 1_000_000;
+          try {
+            await rpc.call('convertOutput', options.progressTime, seconds, info);
+          } catch {
+            try { child.kill(); } catch { /* already exited */ }
+          }
+        }
+      }
+    };
+
+    if (options.progressTime) {
+      child.stdout?.on('data', (data: Buffer) => {
+        data.toString('utf8').split('\n').forEach((line: string) => { onLine(line); });
+      });
+    }
+
+    return new Promise((resolve) => {
+      child.on('exit', (code) => {
+        if (child.pid) convertChildren.delete(child.pid);
+        resolve({ exitCode: code, pid: child.pid, stderr });
+      });
+    });
+  },
+
+  probe: (input: string, json: boolean = false, headers: string[] = []) => {
+    const args: string[] = [];
+    if (json) {
+      args.push('-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams');
+    }
+    (headers || []).forEach((h: string) => {
+      args.push('-headers', h);
+    });
+    args.push(input);
+
     return new Promise((resolve, reject) => {
-      const ffmpegArgs = [
-        '-progress', 'pipe:1',
-        '-hide_banner',
-        ...args
-      ];
-      
-      console.error('[FFmpeg] Command:', this.ffmpegPath, ffmpegArgs.join(' '));
-      
-      this.currentProcess = spawn(this.ffmpegPath, ffmpegArgs);
-      
+      const child = spawn(ffprobeBin, args);
       let stdout = '';
       let stderr = '';
-      let lastProgressTime = 0;
-      
-      this.currentProcess.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString('utf8');
-        stdout += text;
-        
-        // Parse progress from stdout (structured output)
-        if (onProgress) {
-          const progress = this.parseProgress(text);
-          if (progress) {
-            // Calculate percent if duration is known
-            if (duration && progress.outTimeMs) {
-              const currentSeconds = parseInt(progress.outTimeMs, 10) / 1000;
-              progress.percent = (currentSeconds / duration) * 100;
-            }
-            const now = Date.now();
-            if (now - lastProgressTime >= progressTime) {
-              lastProgressTime = now;
-              onProgress(progress);
-            }
-          }
-        }
-      });
-      
-      this.currentProcess.stderr?.on('data', (data: Buffer) => {
-        const text = data.toString('utf8');
-        stderr += text;
-        // Also try to parse progress from stderr for compatibility
-        if (onProgress) {
-          const progress = this.parseLegacyProgress(text);
-          if (progress) {
-            // Calculate percent if duration is known
-            if (duration && progress.outTimeMs) {
-              const currentSeconds = parseInt(progress.outTimeMs, 10) / 1000;
-              progress.percent = (currentSeconds / duration) * 100;
-            }
-            const now = Date.now();
-            if (now - lastProgressTime >= progressTime) {
-              lastProgressTime = now;
-              onProgress(progress);
-            }
-          }
-        }
-      });
-      
-      this.currentProcess.on('close', (code) => {
-        this.currentProcess = null;
-        
+      child.stdout?.on('data', (data: Buffer) => { stdout += data.toString('utf8'); });
+      child.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf8'); });
+      child.on('exit', (code) => {
         if (code === 0) {
-          resolve({ exitCode: code || 0, stdout, stderr });
-        } else {
-          reject(new Error(`FFmpeg exited with code ${code}: ${stderr}`));
-        }
-      });
-      
-      this.currentProcess.on('error', (err) => {
-        this.currentProcess = null;
-        reject(new Error(`FFmpeg error: ${err.message}`));
-      });
-    });
-  }
-  
-  private parseProgress(text: string): FFmpegProgress | null {
-    const result: Record<string, string> = {};
-    const lines = text.split('\n');
-    
-    for (const line of lines) {
-      const idx = line.indexOf('=');
-      if (idx > 0) {
-        const key = line.substring(0, idx).trim();
-        const value = line.substring(idx + 1).trim();
-        if (key && value) {
-          result[key] = value;
-        }
-      }
-    }
-    
-    if (Object.keys(result).length === 0) {
-      return null;
-    }
-    
-    return {
-      percent: 0,
-      outTimeMs: result['out_time_ms'] || '0',
-      frame: parseInt(result['frame'] || '0', 10),
-      fps: parseFloat(result['fps'] || '0'),
-      bitrate: result['bitrate'] || '',
-      totalSize: parseInt(result['total_size'] || '0', 10),
-      speed: result['speed'] || ''
-    };
-  }
-  
-  // Parse legacy stderr progress output (time=00:01:23.45 format)
-  private parseLegacyProgress(text: string): FFmpegProgress | null {
-    // Match time=00:01:23.45 format
-    const timeMatch = text.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
-    if (!timeMatch) return null;
-    
-    const hours = parseInt(timeMatch[1], 10);
-    const minutes = parseInt(timeMatch[2], 10);
-    const seconds = parseInt(timeMatch[3], 10);
-    const centiseconds = parseInt(timeMatch[4], 10);
-    
-    const outTimeMs = String((hours * 3600 + minutes * 60 + seconds) * 1000 + centiseconds * 10);
-    
-    // Parse frame
-    const frameMatch = text.match(/frame=\s*(\d+)/);
-    const frame = frameMatch ? parseInt(frameMatch[1], 10) : 0;
-    
-    // Parse fps
-    const fpsMatch = text.match(/fps=\s*([\d.]+)/);
-    const fps = fpsMatch ? parseFloat(fpsMatch[1]) : 0;
-    
-    // Parse bitrate
-    const bitrateMatch = text.match(/bitrate=\s*([\d.]+[kmg]?\/s?)/);
-    const bitrate = bitrateMatch ? bitrateMatch[1] : '';
-    
-    // Parse speed
-    const speedMatch = text.match(/speed=\s*([\d.]+)x/);
-    const speed = speedMatch ? speedMatch[1] + 'x' : '';
-    
-    // Parse total size
-    const sizeMatch = text.match(/size=\s*(\d+)kB/);
-    const totalSize = sizeMatch ? parseInt(sizeMatch[1], 10) * 1024 : 0;
-    
-    return { percent: 0, outTimeMs, frame, fps, bitrate, totalSize, speed };
-  }
-  
-  /**
-   * Merge video and audio streams into a single file
-   */
-  async mergeStreams(
-    videoPath: string,
-    audioPath: string,
-    outputPath: string,
-    options: {
-      reencode?: boolean;
-      videoCodec?: string;
-      audioCodec?: string;
-      duration?: number;
-      onProgress?: (progress: FFmpegProgress) => void;
-    } = {}
-  ): Promise<void> {
-    const args: string[] = [];
-    
-    // Inputs
-    args.push('-i', videoPath);
-    args.push('-i', audioPath);
-    
-    // Codec settings
-    if (options.reencode) {
-      args.push('-c:v', options.videoCodec || 'libx264');
-      args.push('-c:a', options.audioCodec || 'aac');
-    } else {
-      args.push('-c', 'copy');
-    }
-    
-    // Stream selection
-    args.push('-map', '0:v:0');
-    args.push('-map', '1:a:0');
-    
-    args.push('-y');
-    args.push(outputPath);
-    
-    await this.convert(args, { duration: options.duration, onProgress: options.onProgress });
-  }
-  
-  /**
-   * Probe media file to get stream information
-   */
-  async probe(filePath: string): Promise<any> {
-    const ffprobePath = this.ffmpegPath.replace(/ffmpeg$/, 'ffprobe');
-    const args = [
-      '-v', 'quiet',
-      '-print_format', 'json',
-      '-show_format',
-      '-show_streams',
-      filePath
-    ];
-    
-    return new Promise((resolve, reject) => {
-      const proc = spawn(ffprobePath, args);
-      let stdout = '';
-      
-      proc.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-      
-      proc.on('close', (code) => {
-        if (code === 0) {
-          try {
-            resolve(JSON.parse(stdout));
-          } catch {
-            reject(new Error('Failed to parse ffprobe output'));
+          if (json) {
+            try {
+              resolve(JSON.parse(stdout));
+            } catch {
+              reject(new Error('Failed to parse ffprobe JSON: ' + stderr));
+            }
+          } else {
+            resolve(stdout);
           }
         } else {
-          reject(new Error(`ffprobe exited with code ${code}`));
+          reject(new Error(`ffprobe exited with code ${code}: ${stderr}`));
         }
       });
-      
-      proc.on('error', (err) => {
-        reject(new Error(`ffprobe error: ${err.message}`));
-      });
     });
-  }
-  
-  abort(): void {
-    if (this.currentProcess) {
-      try {
-        this.currentProcess.kill('SIGTERM');
-      } catch {
-        // Process may have already exited
-      }
-      this.currentProcess = null;
-    }
-  }
-  
-  isRunning(): boolean {
-    return this.currentProcess !== null;
-  }
-}
+  },
 
-// Export a singleton instance for convenience
-export const ffmpeg = new FFmpegConverter();
+  'converter.info': () => {
+    return new Promise((resolve) => {
+      const child = spawn(ffmpegBin, ['-h']);
+      let stdout = '';
+      child.stdout?.on('data', (data: Buffer) => { stdout += data.toString('utf8'); });
+      child.on('exit', () => {
+        const versionMatch = stdout.match(/ffmpeg version (\S+)/);
+        const version = versionMatch ? versionMatch[1] : 'unknown';
+        resolve({
+          program: 'ffmpeg',
+          version,
+          converterBinary: ffmpegBin
+        });
+      });
+    });
+  }
+});
+
+process.on('SIGINT', killAll);
+process.on('SIGTERM', killAll);
+process.on('exit', killAll);
+
+console.error('[MediaGrabber CoApp] Converter module loaded (ffmpeg: %s)', ffmpegBin);

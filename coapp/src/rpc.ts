@@ -1,161 +1,87 @@
-// RPC Protocol
-// Implements the weh#rpc protocol for extension <-> CoApp communication
+// Bidirectional RPC protocol (weh#rpc)
+// Both CoApp and extension can send requests and receive responses.
+// Based on VDH's weh-rpc.js pattern.
 
-import * as path from 'path';
+type RpcHandler = (...args: any[]) => Promise<any> | any;
 
-export interface RpcRequest {
-  id: string;
-  method: string;
-  params?: any;
-  _request?: number;  // Request ID for weh#rpc
-  _method?: string;   // Method name for weh#rpc
-  _args?: any[];     // Arguments for weh#rpc
+interface RpcMessage {
+  type: string;
+  _request?: number;
+  _method?: string;
+  _args?: any[];
+  _reply?: number;
+  _result?: any;
+  _error?: string;
 }
 
-export interface RpcResponse {
-  id: string;
-  result?: any;
-  error?: string;
-  _reply?: number;   // Reply ID for weh#rpc
-  _result?: any;     // Result for weh#rpc
-  _error?: string;  // Error for weh#rpc
+class RpcProtocol {
+  private replyId = 0;
+  private replies = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  private listeners: Record<string, RpcHandler> = {};
+  private post: ((msg: RpcMessage) => void) | null = null;
+
+  setPost(fn: (msg: RpcMessage) => void): void {
+    this.post = fn;
+  }
+
+  call<T = any>(method: string, ...args: any[]): Promise<T> {
+    return new Promise((resolve, reject) => {
+      if (!this.post) {
+        reject(new Error("RPC not connected"));
+        return;
+      }
+      const rid = ++this.replyId;
+      this.replies.set(rid, { resolve, reject });
+      this.post({
+        type: "weh#rpc",
+        _request: rid,
+        _method: method,
+        _args: args
+      });
+    });
+  }
+
+  receive(message: RpcMessage): void {
+    if (message._request !== undefined) {
+      const handler = this.listeners[message._method!];
+      Promise.resolve()
+        .then(() => {
+          if (typeof handler !== "function") {
+            throw new Error(`Method ${message._method} is not a function`);
+          }
+          return handler.apply(null, message._args || []);
+        })
+        .then((result) => {
+          this.post!({
+            type: "weh#rpc",
+            _reply: message._request,
+            _result: result
+          });
+        })
+        .catch((error) => {
+          this.post!({
+            type: "weh#rpc",
+            _reply: message._request,
+            _error: error.message || String(error)
+          });
+        });
+    } else if (message._reply !== undefined) {
+      const reply = this.replies.get(message._reply);
+      this.replies.delete(message._reply);
+      if (!reply) return;
+      if (message._error) {
+        reply.reject(new Error(message._error));
+      } else {
+        reply.resolve(message._result);
+      }
+    }
+  }
+
+  listen(handlers: Record<string, RpcHandler>): void {
+    Object.assign(this.listeners, handlers);
+  }
 }
 
-export type RpcHandler = (params?: any) => Promise<any>;
-
-export class RpcProtocol {
-  private handlers: Map<string, RpcHandler>;
-  private requestId: number;
-  private sendFn: ((msg: any) => void) | null = null;
-  
-  constructor() {
-    this.handlers = new Map();
-    this.requestId = 0;
-    this.registerDefaultHandlers();
-  }
-  
-  /**
-   * Set the send function for sending responses
-   */
-  setSendFunction(sendFn: (msg: any) => void): void {
-    this.sendFn = sendFn;
-  }
-  
-  /**
-   * Register a handler for an RPC method
-   */
-  registerHandler(method: string, handler: RpcHandler): void {
-    this.handlers.set(method, handler);
-  }
-  
-  /**
-   * Process an incoming RPC request (supports both formats)
-   */
-  async processRequest(request: RpcRequest): Promise<RpcResponse> {
-    // Support both formats:
-    // 1. Standard: { id, method, params }
-    // 2. weh#rpc: { _request, _method, _args }
-    let method: string;
-    let params: any;
-    
-    if (request._method) {
-      // weh#rpc format
-      method = request._method;
-      params = request._args;
-    } else {
-      // Standard format
-      method = request.method;
-      params = request.params;
-    }
-    
-    const handler = this.handlers.get(method);
-    
-    if (!handler) {
-      return this.createErrorResponse(request, `Unknown method: ${method}`);
-    }
-    
-    try {
-      const result = await handler(params);
-      return this.createSuccessResponse(request, result);
-    } catch (error) {
-      return this.createErrorResponse(request, (error as Error).message || 'Unknown error');
-    }
-  }
-  
-  /**
-   * Create success response
-   */
-  private createSuccessResponse(request: RpcRequest, result: any): RpcResponse {
-    // Use weh#rpc format if request used it
-    if (request._request !== undefined) {
-      return {
-        id: String(request._request),
-        _reply: request._request,
-        _result: result
-      };
-    }
-    return {
-      id: request.id,
-      result
-    };
-  }
-  
-  /**
-   * Create error response
-   */
-  private createErrorResponse(request: RpcRequest, error: string): RpcResponse {
-    if (request._request !== undefined) {
-      return {
-        id: String(request._request),
-        _reply: request._request,
-        _error: error
-      };
-    }
-    return {
-      id: request.id,
-      error
-    };
-  }
-  
-  /**
-   * Register default handlers
-   */
-  private registerDefaultHandlers(): void {
-    this.registerHandler('ping', async () => {
-      return 'pong';
-    });
-    
-    this.registerHandler('get_version', async () => {
-      return { version: '1.0.0' };
-    });
-    
-    this.registerHandler('info', async () => {
-      return {
-        version: '1.0.0',
-        ffmpegPath: this.getFFmpegPath(),
-        platform: process.platform,
-        arch: process.arch
-      };
-    });
-    
-    this.registerHandler('quit', async () => {
-      setTimeout(() => process.exit(0), 100);
-      return { ok: true };
-    });
-  }
-  
-  /**
-   * Get FFmpeg path based on platform
-   */
-  private getFFmpegPath(): string {
-    const platform = process.platform;
-    
-    if (platform === 'win32') {
-      return path.join(__dirname, '..', 'ffmpeg', 'win', 'ffmpeg.exe');
-    } else if (platform === 'darwin') {
-      return path.join(__dirname, '..', 'ffmpeg', 'mac', 'ffmpeg');
-    } else {
-      return path.join(__dirname, '..', 'ffmpeg', 'linux', 'ffmpeg');
-    }
-  }
-}
+const rpc = new RpcProtocol();
+export default rpc;
+export { RpcProtocol };

@@ -1,175 +1,161 @@
 // Native Messaging Client
-// Handles communication with CoApp via native messaging protocol (weh#rpc)
+// Bidirectional weh#rpc over chrome.runtime.connectNative Port.
+// Both sides can send requests and receive responses.
 
-import { DownloadRequest, DownloadResponse } from './types';
-import { ConnectionError, TimeoutError, MethodError, CoAppError } from './errors';
+import { ConnectionError, TimeoutError, CoAppError } from './errors';
 
 const APP_ID = 'com.mediagrabber.coapp';
 const DEFAULT_TIMEOUT = 60000;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY = 1000;
 
-interface RPCRequest {
-  type: 'weh#rpc';
-  _request: number;
-  _method: string;
-  _args: unknown[];
-}
+type RpcHandler = (...args: any[]) => Promise<any> | any;
 
-interface RPCResponse {
-  type: 'weh#rpc';
-  _reply: number;
-  _result?: unknown;
+interface RpcMessage {
+  type: string;
+  _request?: number;
+  _method?: string;
+  _args?: any[];
+  _reply?: number;
+  _result?: any;
   _error?: string;
 }
 
-interface RPCNotification {
-  type: 'weh#rpc';
-  _notify: string;
-  _data: unknown[];
-}
-
-type IncomingMessage = RPCResponse | RPCNotification;
-
 export class NativeClient {
   private port: chrome.runtime.Port | null = null;
-  private pendingRequests = new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>();
-  private requestId = 0;
-  private notifyListeners = new Map<string, ((...args: unknown[]) => void)[]>();
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private replyId = 0;
+  private replies = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  private listeners: Record<string, RpcHandler> = {};
   private isConnected = false;
-  private connectResolver: (() => void) | null = null;
+  private connectingPromise: Promise<void> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentionalDisconnect = false;
 
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    if (this.isConnected && this.port) return;
+    if (this.connectingPromise) return this.connectingPromise;
+
+    this.intentionalDisconnect = false;
+
+    this.connectingPromise = new Promise<void>((resolve, reject) => {
+      let port: chrome.runtime.Port;
       try {
-        // Clean up existing connection
-        this.disconnect();
-
-        this.port = chrome.runtime.connectNative(APP_ID);
-
-        this.port.onMessage.addListener((msg: IncomingMessage) => {
-          this.handleMessage(msg);
-        });
-
-        this.port.onDisconnect.addListener(() => {
-          this.isConnected = false;
-          this.port = null;
-          console.log('[NativeClient] Disconnected from CoApp');
-          this.scheduleReconnect();
-        });
-
-        // Store resolver to call when connection is established
-        this.connectResolver = resolve;
-
-        // Wait for connection confirmation or timeout
-        setTimeout(() => {
-          if (this.port) {
-            this.isConnected = true;
-            if (this.connectResolver) {
-              this.connectResolver();
-              this.connectResolver = null;
-            }
-            resolve();
-          } else {
-            reject(new Error('Connection timeout'));
-          }
-        }, 5000);
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }
-
-  private handleMessage(msg: IncomingMessage): void {
-    if ('_reply' in msg) {
-      // Response to our request
-      const pending = this.pendingRequests.get(msg._reply);
-      if (pending) {
-        if (msg._error) {
-          pending.reject(new Error(msg._error));
-        } else {
-          pending.resolve(msg._result);
-        }
-        this.pendingRequests.delete(msg._reply);
-      }
-    } else if ('_notify' in msg) {
-      // Notification from CoApp
-      const listeners = this.notifyListeners.get(msg._notify) || [];
-      listeners.forEach(fn => {
-        try {
-          fn(...msg._data);
-        } catch (e) {
-          console.error(`[NativeClient] Notification handler error for ${msg._notify}:`, e);
-        }
-      });
-    }
-  }
-
-  async call<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
-    if (!this.port || !this.isConnected) {
-      await this.connect();
-    }
-
-    const requestId = ++this.requestId;
-
-    const request: RPCRequest = {
-      type: 'weh#rpc',
-      _request: requestId,
-      _method: method,
-      _args: args
-    };
-
-    return new Promise((resolve, reject) => {
-      this.pendingRequests.set(requestId, { resolve: resolve as (value: unknown) => void, reject });
-
-      if (!this.port) {
-        this.pendingRequests.delete(requestId);
-        reject(new ConnectionError('Not connected to CoApp'));
+        port = chrome.runtime.connectNative(APP_ID);
+      } catch (e: any) {
+        this.connectingPromise = null;
+        reject(new ConnectionError(e?.message || String(e)));
         return;
       }
 
-      this.port.postMessage(request);
-
-      // Timeout after 60 seconds
-      setTimeout(() => {
-        if (this.pendingRequests.has(requestId)) {
-          this.pendingRequests.delete(requestId);
-          reject(new TimeoutError(method, DEFAULT_TIMEOUT));
+      const send = (msg: RpcMessage): void => {
+        try {
+          port.postMessage(msg);
+        } catch (e) {
+          // port may have disconnected
         }
-      }, DEFAULT_TIMEOUT);
+      };
+
+      port.onMessage.addListener((msg: RpcMessage) => {
+        this.receive(msg, send);
+      });
+
+      port.onDisconnect.addListener(() => {
+        const lastError = chrome.runtime.lastError?.message;
+        this.isConnected = false;
+        this.port = null;
+        this.connectingPromise = null;
+
+        // Reject all pending requests
+        for (const { reject: rej } of this.replies.values()) {
+          rej(new ConnectionError(lastError || 'Disconnected from CoApp'));
+        }
+        this.replies.clear();
+
+        if (!this.intentionalDisconnect) {
+          this.scheduleReconnect();
+        }
+      });
+
+      this.port = port;
+      this.isConnected = true;
+      this.connectingPromise = null;
+      resolve();
+    });
+
+    return this.connectingPromise;
+  }
+
+  private receive(message: RpcMessage, send: (msg: RpcMessage) => void): void {
+    if (message._request !== undefined) {
+      // Incoming request from CoApp (e.g., convertOutput progress push)
+      const handler = this.listeners[message._method!];
+      Promise.resolve()
+        .then(() => {
+          if (typeof handler !== 'function') {
+            throw new Error(`Method ${message._method} is not a function`);
+          }
+          return handler.apply(null, message._args || []);
+        })
+        .then((result) => {
+          send({ type: 'weh#rpc', _reply: message._request, _result: result });
+        })
+        .catch((error) => {
+          send({ type: 'weh#rpc', _reply: message._request, _error: error.message || String(error) });
+        });
+    } else if (message._reply !== undefined) {
+      // Response to our request
+      const reply = this.replies.get(message._reply);
+      this.replies.delete(message._reply);
+      if (!reply) return;
+      if (message._error) {
+        reply.reject(new Error(message._error));
+      } else {
+        reply.resolve(message._result);
+      }
+    }
+  }
+
+  async call<T = any>(method: string, ...args: any[]): Promise<T> {
+    if (!this.port || !this.isConnected) {
+      await this.connect();
+    }
+    if (!this.port) throw new ConnectionError('Not connected to CoApp');
+
+    const rid = ++this.replyId;
+
+    return new Promise<T>((resolve, reject) => {
+      const timeoutMs = method === 'convert' ? 0 : DEFAULT_TIMEOUT;
+      const timer = timeoutMs > 0 ? setTimeout(() => {
+        this.replies.delete(rid);
+        reject(new TimeoutError(method, timeoutMs));
+      }, timeoutMs) : null;
+
+      this.replies.set(rid, {
+        resolve: (v: any) => { if (timer) clearTimeout(timer); resolve(v); },
+        reject: (e: Error) => { if (timer) clearTimeout(timer); reject(e); }
+      });
+
+      try {
+        this.port.postMessage({
+          type: 'weh#rpc',
+          _request: rid,
+          _method: method,
+          _args: args
+        });
+      } catch (e: any) {
+        this.replies.delete(rid);
+        if (timer) clearTimeout(timer);
+        reject(new ConnectionError(e?.message || String(e)));
+      }
     });
   }
 
-  /**
-   * Register a listener for notifications from CoApp
-   * @param name Notification name (e.g., 'convertOutput', 'downloadProgress')
-   * @param callback Function to call when notification arrives
-   */
-  onNotify(name: string, callback: (...args: unknown[]) => void): void {
-    if (!this.notifyListeners.has(name)) {
-      this.notifyListeners.set(name, []);
-    }
-    this.notifyListeners.get(name)!.push(callback);
-  }
-
-  /**
-   * Remove a notification listener
-   */
-  offNotify(name: string, callback: (...args: unknown[]) => void): void {
-    const listeners = this.notifyListeners.get(name);
-    if (listeners) {
-      const index = listeners.indexOf(callback);
-      if (index > -1) {
-        listeners.splice(index, 1);
-      }
-    }
+  listen(handlers: Record<string, RpcHandler>): void {
+    Object.assign(this.listeners, handlers);
   }
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
-
-    console.log('[NativeClient] Scheduling reconnect in 5 seconds...');
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       try {
@@ -183,81 +169,54 @@ export class NativeClient {
   }
 
   disconnect(): void {
+    this.intentionalDisconnect = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     if (this.port) {
-      try {
-        this.port.disconnect();
-      } catch {
-        // Port may already be disconnected
-      }
+      try { this.port.disconnect(); } catch { /* already gone */ }
       this.port = null;
     }
     this.isConnected = false;
-    this.connectResolver = null;
+    this.connectingPromise = null;
   }
 
-  get connected(): boolean {
-    return this.isConnected;
-  }
+  get connected(): boolean { return this.isConnected; }
 
-  /**
-   * Retry a function with exponential backoff
-   */
-  async withRetry<T>(
-    fn: () => Promise<T>,
-    maxRetries: number = DEFAULT_MAX_RETRIES,
-    delay: number = DEFAULT_RETRY_DELAY
-  ): Promise<T> {
+  async withRetry<T>(fn: () => Promise<T>, maxRetries = DEFAULT_MAX_RETRIES, delay = DEFAULT_RETRY_DELAY): Promise<T> {
     let lastError: Error;
-    
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
       } catch (e: any) {
         lastError = e;
-        
-        // Check if error is recoverable
-        if (e instanceof CoAppError && !e.recoverable) {
-          throw e;
-        }
-        
-        console.warn(`[NativeClient] Attempt ${attempt}/${maxRetries} failed:`, e.message);
-        
-        if (attempt < maxRetries) {
-          await this.sleep(delay * attempt);
-        }
+        if (e instanceof CoAppError && !e.recoverable) throw e;
+        if (attempt < maxRetries) await new Promise(r => setTimeout(r, delay * attempt));
       }
     }
-    
     throw lastError!;
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  // Convenience methods
+
+  async ping(): Promise<any> { return this.call('ping', 'hello'); }
+
+  async info(): Promise<any> { return this.call('info'); }
+
+  async convert(args: string[], options?: { progressTime?: number; startHandler?: any }): Promise<{ exitCode: number; pid: number; stderr: string }> {
+    return this.call('convert', args, options || {});
   }
 
-  // Convenience methods for common operations
+  async abortConvert(pid: number): Promise<void> { return this.call('abortConvert', pid); }
 
-  async sendDownloadRequest(request: DownloadRequest): Promise<DownloadResponse> {
-    return this.call<DownloadResponse>('download', request);
+  async downloadFile(options: { url: string; directory?: string; filename?: string; headers?: any[]; rejectUnauthorized?: boolean }): Promise<number> {
+    return this.call('downloads.download', options);
   }
 
-  async getProgress(downloadId: string): Promise<unknown> {
-    return this.call('getProgress', downloadId);
-  }
+  async searchDownloads(id: number): Promise<any[]> { return this.call('downloads.search', { id }); }
 
-  async cancelDownload(downloadId: string): Promise<void> {
-    return this.call('cancelDownload', downloadId);
-  }
+  async cancelDownload(downloadId: number): Promise<void> { return this.call('downloads.cancel', downloadId); }
 
-  async getInfo(): Promise<{ version: string; ffmpegPath: string }> {
-    return this.call('info');
-  }
-
-  async convert(ffmpegArgs: string[], options?: { progressTime?: number }): Promise<{ success: boolean; output?: string; error?: string }> {
-    return this.call('convert', ffmpegArgs, options);
-  }
+  async probe(input: string, json?: boolean, headers?: any[]): Promise<any> { return this.call('probe', input, json, headers); }
 }
