@@ -16,6 +16,7 @@ interface VideoInfo {
   qualities: VideoQuality[];
   thumbnail?: string;
   duration?: number;
+  fileSize?: number;
 }
 
 interface QualityOption {
@@ -25,6 +26,7 @@ interface QualityOption {
   resolution?: string;
   url: string;
   height?: number;
+  sizeLabel?: string;
 }
 
 let port: chrome.runtime.Port;
@@ -251,7 +253,8 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
     bandwidthLabel: q.bitrate ? formatBandwidth(q.bitrate) : 'Unknown',
     resolution: q.width && q.height ? `${q.width}x${q.height}` : undefined,
     url: q.url,
-    height: q.height
+    height: q.height,
+    sizeLabel: getSizeLabel(q, video)
   }));
   
   // If no qualities from detection, use direct URL
@@ -260,7 +263,8 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
       label: 'Direct',
       bandwidth: 0,
       bandwidthLabel: 'Unknown',
-      url: video.url
+      url: video.url,
+      sizeLabel: video.fileSize ? formatFileSize(video.fileSize) : undefined
     }];
   }
   
@@ -321,6 +325,7 @@ function renderQualityList(): void {
       <span class="quality-label">${q.label}</span>
       ${q.resolution ? `<span class="quality-bandwidth">${q.resolution}</span>` : ''}
       <span class="quality-bandwidth">${q.bandwidthLabel}</span>
+      ${q.sizeLabel ? `<span class="quality-size">${q.sizeLabel}</span>` : ''}
     `;
     
     const radio = option.querySelector('input[type="radio"]') as HTMLInputElement;
@@ -602,6 +607,21 @@ function formatDuration(seconds: number): string {
     return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${(bytes / 1073741824).toFixed(2)} GB`;
+}
+
+function getSizeLabel(quality: VideoQuality, video: VideoInfo): string | undefined {
+  if (video.fileSize) return formatFileSize(video.fileSize);
+  if (quality.bitrate && video.duration) {
+    return `~${formatFileSize((quality.bitrate * video.duration) / 8)}`;
+  }
+  return undefined;
 }
 
 function escapeHtml(text: string): string {

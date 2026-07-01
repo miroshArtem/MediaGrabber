@@ -222,7 +222,8 @@ function upsertVideo(tabId: number, video: VideoInfo): void {
       qualities: video.qualities?.length ? video.qualities : videos[existingIndex].qualities,
       childUrls: video.childUrls?.length ? video.childUrls : videos[existingIndex].childUrls,
       thumbnail: video.thumbnail || existing.thumbnail,
-      duration: video.duration || existing.duration
+      duration: video.duration || existing.duration,
+      fileSize: video.fileSize || existing.fileSize
     };
   } else {
     videos.push(video);
@@ -252,6 +253,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
   let qualities: VideoInfo['qualities'] = [];
   let childUrls: string[] | undefined;
   let duration: number | undefined;
+  let fileSize: number | undefined;
 
   if (type === 'hls') {
     try {
@@ -279,6 +281,16 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
     }
   }
 
+  if (type === 'mp4' || type === 'webm') {
+    try {
+      const response = await fetch(url, { method: 'HEAD' });
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) fileSize = parseInt(contentLength, 10);
+    } catch {
+      // ignore — some servers don't support HEAD
+    }
+  }
+
   upsertVideo(tabId, {
     id: generateVideoId(url),
     title,
@@ -287,7 +299,8 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
     qualities,
     childUrls,
     duration: duration || metadata?.duration,
-    thumbnail: metadata?.thumbnail
+    thumbnail: metadata?.thumbnail,
+    fileSize
   });
 
   console.log('[MediaGrabber] Intercepted media:', url, type);

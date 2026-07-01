@@ -36,6 +36,7 @@ export interface VideoInfo {
   childUrls?: string[];
   thumbnail?: string;
   duration?: number;
+  fileSize?: number;
 }
 
 export interface DownloadProgress {
