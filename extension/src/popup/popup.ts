@@ -317,7 +317,7 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
   const filenameInput = document.getElementById('filename') as HTMLInputElement;
   if (filenameInput) {
     const suffix = currentQualities[0]?.label ? `_${currentQualities[0].label}` : '';
-    filenameInput.value = `${video.title || 'video'}${suffix}.mp4`;
+    filenameInput.value = `${video.title || 'video'}${suffix}`;
   }
 }
 
@@ -415,7 +415,7 @@ function selectQuality(index: number): void {
     const quality = currentQualities[index];
     const filenameInput = document.getElementById('filename') as HTMLInputElement;
     if (filenameInput) {
-      filenameInput.value = `${selectedVideo.title || 'video'}_${quality.label}.mp4`;
+      filenameInput.value = `${selectedVideo.title || 'video'}_${quality.label}`;
     }
   }
 }
@@ -425,7 +425,7 @@ function selectQuality(index: number): void {
  */
 function startDownload(video: VideoInfo, quality: QualityOption): void {
   const filenameInput = document.getElementById('filename') as HTMLInputElement;
-  const filename = filenameInput?.value || `${video.title || 'video'}.mp4`;
+  const filename = filenameInput?.value || `${video.title || 'video'}`;
   
   // Show progress UI
   showDownloadingUI();

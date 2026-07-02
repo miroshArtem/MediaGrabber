@@ -228,8 +228,11 @@ function mergeChildUrls(a?: string[], b?: string[]): string[] | undefined {
 
 function commitVideos(tabId: number, videos: VideoInfo[]): void {
   mediaByTab.set(tabId, videos);
-  chrome.action.setBadgeText({ tabId, text: String(videos.length) });
-  chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' });
+  const visibleCount = getVisibleVideosForTab(tabId).length;
+  chrome.action.setBadgeText({ tabId, text: visibleCount > 0 ? String(visibleCount) : '' });
+  if (visibleCount > 0) {
+    chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' });
+  }
   notifyPopups(tabId);
 }
 
@@ -239,7 +242,10 @@ function getVisibleVideosForTab(tabId: number): VideoInfo[] {
   if (metadata?.pageUrl && isYouTubeUrl(metadata.pageUrl)) {
     return videos.filter(video => video.type === 'ytdlp');
   }
-  return videos;
+  const timedVideos = videos.filter(video =>
+    typeof video.duration === 'number' && isFinite(video.duration) && video.duration > 0
+  );
+  return timedVideos.length > 0 ? timedVideos : videos;
 }
 
 function upsertVideo(tabId: number, video: VideoInfo): void {
@@ -460,7 +466,18 @@ async function ensureCoAppConnected(): Promise<void> {
 
 function sanitizeFilename(name: string): string {
   const sanitized = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
-  return sanitized || `video_${Date.now()}.mp4`;
+  return sanitized || `video_${Date.now()}`;
+}
+
+function ensureFilenameExtension(filename: string, extension: string): string {
+  const baseName = filename.replace(/\.(mp4|webm|mkv|mov|m4v|avi|ts|m3u8|mp3|m4a|aac|opus|wav|flac)$/i, '');
+  return `${baseName}.${extension.replace(/^\./, '')}`;
+}
+
+function getDefaultExtension(video: VideoInfo, type: VideoInfo['type']): string {
+  if (type === 'webm') return 'webm';
+  if (video.qualities[0]?.ext === 'mp3') return 'mp3';
+  return 'mp4';
 }
 
 function joinOutputPath(directory: string, filename: string): string {
@@ -473,7 +490,10 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
   await ensureCoAppConnected();
 
   const type = getMediaType(video.url);
-  const outFilename = sanitizeFilename(filename || `${video.title || 'video'}.mp4`);
+  const outFilename = ensureFilenameExtension(
+    sanitizeFilename(filename || `${video.title || 'video'}`),
+    getDefaultExtension(video, type)
+  );
   const directory = defaultDownloadDir;
 
   if (type === 'hls' || type === 'dash') {
