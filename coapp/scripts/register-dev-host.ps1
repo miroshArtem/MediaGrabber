@@ -14,14 +14,17 @@ if (-not (Test-Path $distMain)) {
 }
 
 $devDir = Join-Path $env:LOCALAPPDATA 'MediaGrabberDev'
-$launcherExe = Join-Path $devDir 'mediagrabber-host-v2.exe'
+$launcherExe = Join-Path $devDir 'mediagrabber-host-v3.exe'
 $manifestPath = Join-Path $devDir 'com.mediagrabber.coapp.json'
 
 New-Item -ItemType Directory -Force -Path $devDir | Out-Null
 
 Push-Location $projectRoot
 try {
-    npx pkg -t node18-win-x64 -o $launcherExe $distMain | Out-Null
+    npx pkg -t node18-win-x64 -o $launcherExe $distMain
+    if ($LASTEXITCODE -ne 0) {
+        throw "pkg failed with exit code $LASTEXITCODE"
+    }
 }
 finally {
     Pop-Location

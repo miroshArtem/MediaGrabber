@@ -25,13 +25,15 @@ export interface VideoQuality {
   width?: number;
   bitrate?: number;
   url: string;
+  label?: string;
+  formatArgs?: string[];
 }
 
 export interface VideoInfo {
   id: string;
   title: string;
   url: string;
-  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm';
+  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp';
   qualities: VideoQuality[];
   childUrls?: string[];
   thumbnail?: string;

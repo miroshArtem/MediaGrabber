@@ -9,13 +9,15 @@ interface VideoQuality {
   width?: number;
   bitrate?: number;
   url: string;
+  label?: string;
+  formatArgs?: string[];
 }
 
 interface VideoInfo {
   id: string;
   title: string;
   url: string;
-  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm';
+  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp';
   qualities: VideoQuality[];
   thumbnail?: string;
   duration?: number;
@@ -30,6 +32,7 @@ interface QualityOption {
   url: string;
   height?: number;
   sizeLabel?: string;
+  formatArgs?: string[];
 }
 
 let port: chrome.runtime.Port;
@@ -262,13 +265,14 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
   
   // Convert qualities to options
   currentQualities = video.qualities.map(q => ({
-    label: getQualityLabel(q.height),
+    label: q.label || getQualityLabel(q.height),
     bandwidth: q.bitrate || 0,
     bandwidthLabel: q.bitrate ? formatBandwidth(q.bitrate) : 'Unknown',
     resolution: q.width && q.height ? `${q.width}x${q.height}` : undefined,
     url: q.url,
     height: q.height,
-    sizeLabel: getSizeLabel(q, video)
+    sizeLabel: getSizeLabel(q, video),
+    formatArgs: q.formatArgs
   }));
   
   // If no qualities from detection, use direct URL
@@ -406,11 +410,13 @@ function startDownload(video: VideoInfo, quality: QualityOption): void {
       video: {
         ...video,
         url: quality.url,
-        qualities: quality.height ? [{
+        qualities: [{
           height: quality.height,
           bitrate: quality.bandwidth,
-          url: quality.url
-        }] : []
+          url: quality.url,
+          label: quality.label,
+          formatArgs: quality.formatArgs
+        }]
       },
       filename: filename
     });
@@ -596,6 +602,8 @@ function getTypeLabel(type: string): string {
       return 'MP4';
     case 'webm':
       return 'WebM';
+    case 'ytdlp':
+      return 'YT-DLP';
     default:
       return 'Video';
   }

@@ -5,6 +5,7 @@
 
 import './native-messaging';
 import './converter';
+import './ytdlp';
 import './downloads';
 import rpc from './rpc';
 import * as os from 'os';

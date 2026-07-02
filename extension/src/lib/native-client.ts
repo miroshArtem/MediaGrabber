@@ -124,7 +124,7 @@ export class NativeClient {
     const rid = ++this.replyId;
 
     return new Promise<T>((resolve, reject) => {
-      const timeoutMs = method === 'convert' ? 0 : DEFAULT_TIMEOUT;
+      const timeoutMs = (method === 'convert' || method === 'ytdlp') ? 0 : DEFAULT_TIMEOUT;
       const timer = timeoutMs > 0 ? setTimeout(() => {
         this.replies.delete(rid);
         reject(new TimeoutError(method, timeoutMs));
@@ -209,6 +209,12 @@ export class NativeClient {
   }
 
   async abortConvert(pid: number): Promise<void> { return this.call('abortConvert', pid); }
+
+  async ytdlp(url: string, args: string[], options?: { progressTime?: number; startHandler?: any; outputDir?: string; filename?: string }): Promise<{ exitCode: number; pid: number; stderr: string }> {
+    return this.call('ytdlp', url, args, options || {});
+  }
+
+  async abortYtdlp(pid: number): Promise<void> { return this.call('abortYtdlp', pid); }
 
   async downloadFile(options: { url: string; directory?: string; filename?: string; headers?: any[]; rejectUnauthorized?: boolean }): Promise<number> {
     return this.call('downloads.download', options);

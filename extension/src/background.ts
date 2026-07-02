@@ -24,7 +24,7 @@ const pageMetadataByTab = new Map<number, PageMetadata>();
 const activeDownloads = new Map<string, {
   pid?: number;
   downloadId?: number;
-  type: 'convert' | 'direct';
+  type: 'convert' | 'direct' | 'ytdlp';
   video?: VideoInfo;
   directory: string;
   filename: string;
@@ -71,15 +71,18 @@ nativeClient.listen({
   // FFmpeg progress push: (progressTime, currentSeconds, info)
   convertOutput: (progressTime: number, currentSeconds: number, info: any) => {
     for (const [key, dl] of activeDownloads) {
-      if (dl.type !== 'convert' || !dl.video) continue;
+      if (!dl.video) continue;
+      if (dl.type !== 'convert' && dl.type !== 'ytdlp') continue;
       const duration = dl.video.duration || 0;
-      const percent = duration > 0 ? Math.min(100, (currentSeconds / duration) * 100) : 0;
-      dl.lastProgress = { percent, speed: info.speed || '' };
+      const percent = info?.percent != null
+        ? Math.min(100, info.percent)
+        : duration > 0 ? Math.min(100, (currentSeconds / duration) * 100) : 0;
+      dl.lastProgress = { percent, speed: info?.speed || '', eta: info?.eta };
       popupPorts.forEach(port => {
         port.postMessage({
           type: 'DOWNLOAD_PROGRESS',
           downloadId: key,
-          progress: { percent, currentSeconds, speed: info.speed || '', bitrate: info.bitrate || '' }
+          progress: { percent, currentSeconds, speed: info?.speed || '', eta: info?.eta, bitrate: info?.bitrate || '' }
         });
       });
     }
@@ -179,6 +182,26 @@ function getMediaType(url: string): VideoInfo['type'] {
   return 'direct';
 }
 
+function isYouTubeUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const h = u.hostname;
+    return h === 'youtube.com' || h === 'www.youtube.com' ||
+           h === 'm.youtube.com' || h === 'youtu.be' ||
+           h === 'youtube-nocookie.com' || h === 'www.youtube-nocookie.com';
+  } catch {
+    return false;
+  }
+}
+
+const YTDLP_QUALITIES = [
+  { label: 'Best', height: 0, formatArgs: ['-f', 'bestvideo+bestaudio/best'] },
+  { label: '1080p', height: 1080, formatArgs: ['-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'] },
+  { label: '720p', height: 720, formatArgs: ['-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]'] },
+  { label: '480p', height: 480, formatArgs: ['-f', 'bestvideo[height<=480]+bestaudio/best[height<=480]'] },
+  { label: 'Audio MP3', height: 0, formatArgs: ['-x', '--audio-format', 'mp3'] }
+];
+
 function generateVideoId(url: string): string {
   // Safe base64 for non-ASCII URLs
   try {
@@ -208,6 +231,15 @@ function commitVideos(tabId: number, videos: VideoInfo[]): void {
   chrome.action.setBadgeText({ tabId, text: String(videos.length) });
   chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' });
   notifyPopups(tabId);
+}
+
+function getVisibleVideosForTab(tabId: number): VideoInfo[] {
+  const videos = mediaByTab.get(tabId) || [];
+  const metadata = pageMetadataByTab.get(tabId);
+  if (metadata?.pageUrl && isYouTubeUrl(metadata.pageUrl)) {
+    return videos.filter(video => video.type === 'ytdlp');
+  }
+  return videos;
 }
 
 function upsertVideo(tabId: number, video: VideoInfo): void {
@@ -357,11 +389,11 @@ function handlePopupMessage(port: chrome.runtime.Port, msg: any): void {
   switch (msg.type) {
     case 'GET_MEDIA':
       if (typeof msg.tabId === 'number') {
-        const videos = mediaByTab.get(msg.tabId) || [];
+        const videos = getVisibleVideosForTab(msg.tabId);
         port.postMessage({ type: 'MEDIA_LIST', videos });
       } else {
         chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-          const videos = tabs[0]?.id ? (mediaByTab.get(tabs[0].id) || []) : [];
+          const videos = tabs[0]?.id ? getVisibleVideosForTab(tabs[0].id) : [];
           port.postMessage({ type: 'MEDIA_LIST', videos });
         });
       }
@@ -400,7 +432,7 @@ function handlePopupMessage(port: chrome.runtime.Port, msg: any): void {
 }
 
 function notifyPopups(tabId: number): void {
-  const videos = mediaByTab.get(tabId);
+  const videos = getVisibleVideosForTab(tabId);
   if (videos) {
     popupPorts.forEach(port => {
       port.postMessage({ type: 'MEDIA_LIST', videos });
@@ -471,6 +503,45 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
         notify('Download failed', outFilename);
         popupPorts.forEach(port => {
           port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: `FFmpeg exit code ${result.exitCode}: ${result.stderr}` });
+        });
+      }
+      activeDownloads.delete(downloadKey);
+    }).catch(err => {
+      notify('Download failed', err.message);
+      popupPorts.forEach(port => {
+        port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: err.message });
+      });
+      activeDownloads.delete(downloadKey);
+    });
+
+    return { success: true, downloadId: downloadKey };
+  } else if (video.type === 'ytdlp') {
+    // yt-dlp path (YouTube etc.)
+    const downloadKey = `ytdlp_${Date.now()}`;
+    const formatArgs = video.qualities[0]?.formatArgs || YTDLP_QUALITIES[0].formatArgs;
+
+    activeDownloads.set(downloadKey, {
+      type: 'ytdlp',
+      video,
+      directory,
+      filename: outFilename,
+      tabId
+    });
+
+    nativeClient.ytdlp(
+      video.url,
+      formatArgs,
+      { progressTime: 1000, startHandler: downloadKey, outputDir: directory || undefined, filename: outFilename.replace(/\.[^.]+$/, '.%(ext)s') }
+    ).then(result => {
+      if (result.exitCode === 0) {
+        notify('Download complete', outFilename);
+        popupPorts.forEach(port => {
+          port.postMessage({ type: 'DOWNLOAD_COMPLETE', downloadId: downloadKey });
+        });
+      } else {
+        notify('Download failed', outFilename);
+        popupPorts.forEach(port => {
+          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: `yt-dlp exit code ${result.exitCode}: ${result.stderr}` });
         });
       }
       activeDownloads.delete(downloadKey);
@@ -557,6 +628,8 @@ async function handleCancelDownload(downloadId: string): Promise<any> {
 
   if (dl.type === 'convert' && dl.pid !== undefined) {
     await nativeClient.abortConvert(dl.pid);
+  } else if (dl.type === 'ytdlp' && dl.pid !== undefined) {
+    await nativeClient.abortYtdlp(dl.pid);
   } else if (dl.type === 'direct' && dl.downloadId !== undefined) {
     await nativeClient.cancelDownload(dl.downloadId);
   }
@@ -609,19 +682,64 @@ function handleVideoDetected(tabId: number | undefined, video: VideoInfo): any {
   return { success: true, count: (mediaByTab.get(tabId) || []).length };
 }
 
+function addYouTubeVideo(tabId: number, metadata: PageMetadata): void {
+  const url = metadata.pageUrl!;
+  const videoId = `ytdlp_${tabId}`;
+
+  const existing = (mediaByTab.get(tabId) || []).find(v => v.id === videoId);
+  if (existing) {
+    const qualities: VideoInfo['qualities'] = YTDLP_QUALITIES.map(q => ({
+      height: q.height,
+      url,
+      bitrate: 0,
+      label: q.label,
+      formatArgs: q.formatArgs
+    }));
+    const videos = (mediaByTab.get(tabId) || []).map(v =>
+      v.id === videoId
+        ? { ...v, title: metadata.title || v.title, thumbnail: metadata.thumbnail || v.thumbnail, url, qualities }
+        : v
+    );
+    commitVideos(tabId, videos);
+    return;
+  }
+
+  const qualities: VideoInfo['qualities'] = YTDLP_QUALITIES.map(q => ({
+    height: q.height,
+    url,
+    bitrate: 0,
+    label: q.label,
+    formatArgs: q.formatArgs
+  }));
+
+  upsertVideo(tabId, {
+    id: videoId,
+    title: metadata.title || 'YouTube Video',
+    url,
+    type: 'ytdlp',
+    qualities,
+    thumbnail: metadata.thumbnail,
+    duration: metadata.duration
+  });
+}
+
 function handlePageMetadata(tabId: number | undefined, metadata: PageMetadata, frameId?: number): any {
   if (tabId === undefined) return { error: 'No tabId' };
 
   const previous = pageMetadataByTab.get(tabId) || {};
   const isTopFrame = frameId === 0;
   const merged: PageMetadata = {
-    pageUrl: metadata.pageUrl || previous.pageUrl,
+    pageUrl: isTopFrame ? (metadata.pageUrl || previous.pageUrl) : previous.pageUrl,
     title: isTopFrame ? (metadata.title || previous.title) : (previous.title || metadata.title),
     thumbnail: isTopFrame ? (metadata.thumbnail || previous.thumbnail) : (previous.thumbnail || metadata.thumbnail),
     duration: metadata.duration || previous.duration
   };
 
   pageMetadataByTab.set(tabId, merged);
+
+  if (merged.pageUrl && isYouTubeUrl(merged.pageUrl)) {
+    addYouTubeVideo(tabId, merged);
+  }
 
   const videos = mediaByTab.get(tabId);
   if (videos?.length) {
