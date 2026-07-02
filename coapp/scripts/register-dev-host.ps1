@@ -14,7 +14,7 @@ if (-not (Test-Path $distMain)) {
 }
 
 $devDir = Join-Path $env:LOCALAPPDATA 'MediaGrabberDev'
-$launcherExe = Join-Path $devDir 'mediagrabber-host-v3.exe'
+$launcherExe = Join-Path $devDir 'mediagrabber-host-v6.exe'
 $manifestPath = Join-Path $devDir 'com.mediagrabber.coapp.json'
 
 New-Item -ItemType Directory -Force -Path $devDir | Out-Null

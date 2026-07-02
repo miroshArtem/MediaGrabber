@@ -60,6 +60,107 @@ const DL_PERCENT_RE = /\[download\]\s+([\d.]+)%/;
 const SPEED_RE = /at\s+([\d.]+\w+\/s)/;
 const ETA_RE = /ETA\s+([\d:]+)/;
 
+function asNumber(value: any): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function formatSize(format: any): number | undefined {
+  return asNumber(format?.filesize) || asNumber(format?.filesize_approx);
+}
+
+function formatScore(format: any): number {
+  return (asNumber(format?.tbr) || 0) * 1000000 + (formatSize(format) || 0) / 1000;
+}
+
+function chooseBest(formats: any[]): any | undefined {
+  return formats.reduce((best, current) => {
+    if (!best) return current;
+    return formatScore(current) > formatScore(best) ? current : best;
+  }, undefined);
+}
+
+function qualityLabel(format: any): string {
+  const height = asNumber(format?.height) || 0;
+  let label = height >= 2160 ? '4K' : height >= 1440 ? '1440p' : height ? `${height}p` : 'Video';
+  const fps = asNumber(format?.fps);
+  if (fps && fps > 30) label += ` ${Math.round(fps)}fps`;
+  const dynamicRange = typeof format?.dynamic_range === 'string' ? format.dynamic_range : '';
+  if (dynamicRange && dynamicRange !== 'SDR') label += ` ${dynamicRange}`;
+  return label;
+}
+
+function audioSelectorFor(format: any): string {
+  return format?.ext === 'webm' ? 'ba[ext=webm]/ba' : 'ba[ext=m4a]/ba';
+}
+
+function buildYtDlpQualities(info: any, url: string): any[] {
+  const formats = Array.isArray(info?.formats) ? info.formats : [];
+  const audioFormats = formats.filter((format: any) =>
+    format?.format_id && format?.acodec && format.acodec !== 'none' && format?.vcodec === 'none'
+  );
+  const bestAudio = chooseBest(audioFormats);
+
+  const grouped = new Map<string, any>();
+  formats
+    .filter((format: any) =>
+      format?.format_id &&
+      format?.vcodec && format.vcodec !== 'none' &&
+      asNumber(format.height)
+    )
+    .forEach((format: any) => {
+      const fps = Math.round(asNumber(format.fps) || 0);
+      const dynamicRange = format.dynamic_range || 'SDR';
+      const key = `${format.height}:${fps}:${dynamicRange}`;
+      const existing = grouped.get(key);
+      if (!existing || formatScore(format) > formatScore(existing)) {
+        grouped.set(key, format);
+      }
+    });
+
+  const qualities: any[] = Array.from(grouped.values())
+    .sort((a, b) =>
+      (asNumber(b.height) || 0) - (asNumber(a.height) || 0) ||
+      (asNumber(b.fps) || 0) - (asNumber(a.fps) || 0) ||
+      formatScore(b) - formatScore(a)
+    )
+    .map((format: any) => {
+      const formatId = String(format.format_id);
+      const hasAudio = format.acodec && format.acodec !== 'none';
+      const selector = hasAudio ? formatId : `${formatId}+${audioSelectorFor(format)}`;
+      const size = formatSize(format);
+      const audioSize = hasAudio ? undefined : formatSize(bestAudio);
+      const fileSize = size && audioSize ? size + audioSize : size;
+      return {
+        height: asNumber(format.height) || 0,
+        width: asNumber(format.width),
+        bitrate: asNumber(format.tbr) ? Math.round(asNumber(format.tbr)! * 1000) : undefined,
+        url,
+        label: qualityLabel(format),
+        formatArgs: ['-f', selector],
+        formatId,
+        ext: format.ext,
+        fps: asNumber(format.fps),
+        fileSize
+      };
+    });
+
+  if (bestAudio) {
+    qualities.push({
+      height: 0,
+      bitrate: asNumber(bestAudio.abr || bestAudio.tbr) ? Math.round(asNumber(bestAudio.abr || bestAudio.tbr)! * 1000) : undefined,
+      url,
+      label: 'Audio MP3',
+      formatArgs: ['-f', 'ba', '-x', '--audio-format', 'mp3', '--audio-quality', '0'],
+      formatId: String(bestAudio.format_id),
+      ext: 'mp3',
+      fileSize: formatSize(bestAudio)
+    });
+  }
+
+  return qualities;
+}
+
 function killAll(): void {
   to_kill.forEach(c => { try { c.kill(); } catch { /* gone */ } });
 }
@@ -71,6 +172,38 @@ rpc.listen({
       try { child.kill(); } catch { /* gone */ }
     }
     return { success: true };
+  },
+
+  ytdlpFormats: async (url: string) => {
+    const args = ['--no-playlist', '--no-warnings', '-J', url];
+    const child = spawn(ytdlpBin, args);
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
+    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
+
+    return new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          reject(new Error(`yt-dlp format probe failed (${code}): ${stderr}`));
+          return;
+        }
+
+        try {
+          const info = JSON.parse(stdout.trim());
+          resolve({
+            title: info.title,
+            duration: info.duration,
+            thumbnail: info.thumbnail,
+            qualities: buildYtDlpQualities(info, url)
+          });
+        } catch (error: any) {
+          reject(new Error(`Failed to parse yt-dlp format JSON: ${error.message || String(error)}`));
+        }
+      });
+    });
   },
 
   ytdlp: async (

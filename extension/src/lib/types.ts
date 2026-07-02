@@ -27,6 +27,10 @@ export interface VideoQuality {
   url: string;
   label?: string;
   formatArgs?: string[];
+  formatId?: string;
+  ext?: string;
+  fps?: number;
+  fileSize?: number;
 }
 
 export interface VideoInfo {

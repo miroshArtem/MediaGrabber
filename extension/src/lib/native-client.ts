@@ -214,6 +214,10 @@ export class NativeClient {
     return this.call('ytdlp', url, args, options || {});
   }
 
+  async ytdlpFormats(url: string): Promise<{ title?: string; duration?: number; thumbnail?: string; qualities: any[] }> {
+    return this.call('ytdlpFormats', url);
+  }
+
   async abortYtdlp(pid: number): Promise<void> { return this.call('abortYtdlp', pid); }
 
   async downloadFile(options: { url: string; directory?: string; filename?: string; headers?: any[]; rejectUnauthorized?: boolean }): Promise<number> {

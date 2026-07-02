@@ -11,6 +11,10 @@ interface VideoQuality {
   url: string;
   label?: string;
   formatArgs?: string[];
+  formatId?: string;
+  ext?: string;
+  fps?: number;
+  fileSize?: number;
 }
 
 interface VideoInfo {
@@ -33,6 +37,10 @@ interface QualityOption {
   height?: number;
   sizeLabel?: string;
   formatArgs?: string[];
+  formatId?: string;
+  ext?: string;
+  fps?: number;
+  fileSize?: number;
 }
 
 let port: chrome.runtime.Port;
@@ -185,11 +193,21 @@ function renderMediaList(videos: VideoInfo[]): void {
   videoList.classList.remove('hidden');
   
   container.innerHTML = '';
+  let updatedSelectedVideo: VideoInfo | null = null;
+  let updatedSelectedElement: HTMLElement | null = null;
   
   displayVideos.forEach((video, index) => {
     const videoEl = createMediaItem(video, index);
     container.appendChild(videoEl);
+    if (selectedVideo?.id === video.id) {
+      updatedSelectedVideo = video;
+      updatedSelectedElement = videoEl;
+    }
   });
+
+  if (updatedSelectedVideo && updatedSelectedElement) {
+    selectMedia(updatedSelectedVideo, updatedSelectedElement);
+  }
   
   updateStatus(`${displayVideos.length} media found`, 'success');
 }
@@ -272,11 +290,15 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
     url: q.url,
     height: q.height,
     sizeLabel: getSizeLabel(q, video),
-    formatArgs: q.formatArgs
+    formatArgs: q.formatArgs,
+    formatId: q.formatId,
+    ext: q.ext,
+    fps: q.fps,
+    fileSize: q.fileSize
   }));
   
   // If no qualities from detection, use direct URL
-  if (currentQualities.length === 0) {
+  if (currentQualities.length === 0 && video.type !== 'ytdlp') {
     currentQualities = [{
       label: 'Direct',
       bandwidth: 0,
@@ -294,7 +316,8 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
   // Set default filename
   const filenameInput = document.getElementById('filename') as HTMLInputElement;
   if (filenameInput) {
-    filenameInput.value = `${video.title || 'video'}_${currentQualities[0].label}.mp4`;
+    const suffix = currentQualities[0]?.label ? `_${currentQualities[0].label}` : '';
+    filenameInput.value = `${video.title || 'video'}${suffix}.mp4`;
   }
 }
 
@@ -303,12 +326,15 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
  */
 function renderQualityList(): void {
   const container = document.getElementById('quality-list')!;
+  const downloadBtn = document.getElementById('download-btn') as HTMLButtonElement | null;
   container.innerHTML = '';
   
   if (currentQualities.length === 0) {
-    container.innerHTML = '<p class="no-quality">No quality options available</p>';
+    container.innerHTML = '<p class="no-quality">Loading YouTube qualities…</p>';
+    if (downloadBtn) downloadBtn.disabled = true;
     return;
   }
+  if (downloadBtn) downloadBtn.disabled = false;
   
   // Quick options
   const quickOptions = document.createElement('div');
@@ -327,7 +353,8 @@ function renderQualityList(): void {
       if (quality === 'best') {
         selectQuality(0);
       } else if (quality === 'worst') {
-        selectQuality(currentQualities.length - 1);
+        const index = findLowestVideoQualityIndex();
+        selectQuality(index >= 0 ? index : currentQualities.length - 1);
       }
     });
   });
@@ -415,7 +442,11 @@ function startDownload(video: VideoInfo, quality: QualityOption): void {
           bitrate: quality.bandwidth,
           url: quality.url,
           label: quality.label,
-          formatArgs: quality.formatArgs
+          formatArgs: quality.formatArgs,
+          formatId: quality.formatId,
+          ext: quality.ext,
+          fps: quality.fps,
+          fileSize: quality.fileSize
         }]
       },
       filename: filename
@@ -672,11 +703,19 @@ function formatFileSize(bytes: number): string {
 }
 
 function getSizeLabel(quality: VideoQuality, video: VideoInfo): string | undefined {
+  if (quality.fileSize) return formatFileSize(quality.fileSize);
   if (video.fileSize) return formatFileSize(video.fileSize);
   if (quality.bitrate && video.duration) {
     return `~${formatFileSize((quality.bitrate * video.duration) / 8)}`;
   }
   return undefined;
+}
+
+function findLowestVideoQualityIndex(): number {
+  for (let i = currentQualities.length - 1; i >= 0; i--) {
+    if ((currentQualities[i].height || 0) > 0) return i;
+  }
+  return -1;
 }
 
 function escapeHtml(text: string): string {
