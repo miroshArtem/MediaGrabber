@@ -4,6 +4,7 @@
 import { NativeClient } from './lib/native-client';
 import { VideoInfo } from './lib/types';
 import { M3U8ParserWrapper } from './lib/m3u8-parser';
+import { DashParserWrapper } from './lib/dash-parser';
 import { loadSettings, Settings } from './lib/settings';
 
 interface PageMetadata {
@@ -347,6 +348,23 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
       }
     } catch (error) {
       console.warn('[MediaGrabber] Failed to parse HLS manifest:', error);
+    }
+  }
+
+  if (type === 'dash') {
+    try {
+      const parsed = await DashParserWrapper.fetchAndParse(url);
+      duration = parsed.duration;
+      childUrls = parsed.childUrls;
+      qualities = parsed.variants.map((variant) => ({
+        height: variant.height || 0,
+        width: variant.width,
+        bitrate: variant.bandwidth,
+        url: variant.url,
+        label: variant.name
+      }));
+    } catch (error) {
+      console.warn('[MediaGrabber] Failed to parse DASH manifest:', error);
     }
   }
 
