@@ -33,8 +33,10 @@ export class M3U8ParserWrapper {
   /**
    * Fetch and parse an M3U8 playlist from URL
    */
-  static async fetchAndParse(url: string): Promise<ParsedM3U8> {
-    const response = await fetch(url);
+  static async fetchAndParse(url: string, referer?: string): Promise<ParsedM3U8> {
+    const init: RequestInit = {};
+    if (referer) init.referrer = referer;
+    const response = await fetch(url, init);
     const text = await response.text();
     return M3U8ParserWrapper.parse(text, url);
   }

@@ -319,6 +319,17 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
   const metadata = pageMetadataByTab.get(tabId);
   const title = metadata?.title || await getTabTitle(tabId);
   const type = getMediaType(url);
+  const referer = metadata?.pageUrl;
+
+  // Deduplicate HLS/DASH manifests from redirect chains (same path, different CDN host)
+  if (type === 'hls' || type === 'dash') {
+    let urlPath: string;
+    try { urlPath = new URL(url).pathname; } catch { urlPath = url; }
+    const existing = (mediaByTab.get(tabId) || []).find(v =>
+      v.type === type && (() => { try { return new URL(v.url).pathname === urlPath; } catch { return false; } })()
+    );
+    if (existing) return;
+  }
 
   let qualities: VideoInfo['qualities'] = [];
   let childUrls: string[] | undefined;
@@ -327,7 +338,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
 
   if (type === 'hls') {
     try {
-      const parsed = await M3U8ParserWrapper.fetchAndParse(url);
+      const parsed = await M3U8ParserWrapper.fetchAndParse(url, referer);
       duration = parsed.duration;
       childUrls = parsed.childUrls;
       qualities = parsed.variants.map((variant) => ({
@@ -374,7 +385,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
 
   if (type === 'dash') {
     try {
-      const parsed = await DashParserWrapper.fetchAndParse(url);
+      const parsed = await DashParserWrapper.fetchAndParse(url, referer);
       duration = parsed.duration;
       childUrls = parsed.childUrls;
       qualities = parsed.variants.map((variant) => ({

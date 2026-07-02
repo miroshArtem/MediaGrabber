@@ -29,8 +29,10 @@ export interface ParsedDash {
 }
 
 export class DashParserWrapper {
-  static async fetchAndParse(url: string): Promise<ParsedDash> {
-    const response = await fetch(url);
+  static async fetchAndParse(url: string, referer?: string): Promise<ParsedDash> {
+    const init: RequestInit = {};
+    if (referer) init.referrer = referer;
+    const response = await fetch(url, init);
     const text = await response.text();
     return DashParserWrapper.parse(text, url);
   }
