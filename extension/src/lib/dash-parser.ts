@@ -14,9 +14,16 @@ export interface DashStreamInfo {
   encrypted: boolean;
 }
 
+export interface DashSubtitleTrack {
+  url: string;
+  lang?: string;
+  mimeType?: string;
+}
+
 export interface ParsedDash {
   type: 'master' | 'media';
   variants: DashStreamInfo[];
+  subtitleTracks?: DashSubtitleTrack[];
   childUrls?: string[];
   duration?: number;
 }
@@ -37,12 +44,27 @@ export class DashParserWrapper {
     const adaptationSets = DashParserWrapper.extractAdaptationSets(manifest);
 
     const variants: DashStreamInfo[] = [];
+    const subtitleTracks: DashSubtitleTrack[] = [];
     const childUrls: Set<string> = new Set();
 
     for (const asBlock of adaptationSets) {
       const asAttrs = DashParserWrapper.extractAttrs(asBlock.openTag);
       const isVideo = DashParserWrapper.isVideoAdaptationSet(asAttrs);
+      const isText = asAttrs.contentType === 'text' || (asAttrs.mimeType || '').startsWith('text/');
       const encrypted = asBlock.content.includes('<ContentProtection');
+
+      if (isText) {
+        const lang = asAttrs.lang || asAttrs.language;
+        const baseUrlMatch = asBlock.content.match(/<BaseURL[^>]*>([^<]+)<\/BaseURL>/);
+        if (baseUrlMatch) {
+          const subUrl = DashParserWrapper.resolveUrl(baseUrlMatch[1].trim(), manifestUrl);
+          childUrls.add(subUrl);
+          subtitleTracks.push({ url: subUrl, lang, mimeType: asAttrs.mimeType });
+        } else {
+          subtitleTracks.push({ url: manifestUrl, lang, mimeType: asAttrs.mimeType });
+        }
+        continue;
+      }
 
       // Collect BaseURL and audio rendition URIs as childUrls
       const baseUrlMatch = asBlock.content.match(/<BaseURL[^>]*>([^<]+)<\/BaseURL>/);
@@ -90,6 +112,7 @@ export class DashParserWrapper {
     return {
       type: 'master',
       variants: deduped,
+      subtitleTracks: subtitleTracks.length > 0 ? subtitleTracks : undefined,
       childUrls: childUrls.size > 0 ? Array.from(childUrls) : undefined,
       duration
     };

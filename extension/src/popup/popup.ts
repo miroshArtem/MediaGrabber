@@ -23,7 +23,7 @@ interface VideoInfo {
   id: string;
   title: string;
   url: string;
-  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp';
+  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp' | 'mse';
   qualities: VideoQuality[];
   thumbnail?: string;
   duration?: number;
@@ -375,6 +375,7 @@ function renderQualityList(): void {
       <input type="radio" name="quality" value="${index}" class="quality-radio">
       <span class="quality-label">${q.label}</span>
       ${q.kind === 'audio' ? '<span class="quality-kind">Audio</span>' : ''}
+      ${q.kind === 'subtitle' ? '<span class="quality-kind quality-kind-sub">SUB</span>' : ''}
       ${q.resolution ? `<span class="quality-bandwidth">${q.resolution}</span>` : ''}
       <span class="quality-bandwidth">${q.bandwidthLabel}</span>
       ${q.sizeLabel ? `<span class="quality-size">${q.sizeLabel}</span>` : ''}
@@ -642,6 +643,8 @@ function getTypeLabel(type: string): string {
       return 'WebM';
     case 'ytdlp':
       return 'YT-DLP';
+    case 'mse':
+      return 'MSE';
     default:
       return 'Video';
   }

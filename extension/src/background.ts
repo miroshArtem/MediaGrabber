@@ -341,8 +341,11 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
 
       for (const r of parsed.mediaRenditions || []) {
         if (!r.uri || r.type === 'CLOSED-CAPTIONS') continue;
+        const kind = r.type === 'AUDIO' ? 'audio' as const : r.type === 'SUBTITLES' ? 'subtitle' as const : undefined;
+        if (!kind) continue;
         const labelParts: string[] = [];
         if (r.type === 'AUDIO') labelParts.push('Audio');
+        else if (r.type === 'SUBTITLES') labelParts.push('Subtitles');
         if (r.name) labelParts.push(r.name);
         else if (r.language) labelParts.push(r.language);
         qualities.push({
@@ -350,7 +353,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
           url: r.uri,
           bitrate: 0,
           label: labelParts.join(' — ') || 'Alternate track',
-          kind: r.type === 'AUDIO' ? 'audio' as const : undefined,
+          kind,
           language: r.language
         });
       }
@@ -381,6 +384,19 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
         url: variant.url,
         label: variant.name
       }));
+
+      for (const s of parsed.subtitleTracks || []) {
+        const labelParts = ['Subtitles'];
+        if (s.lang) labelParts.push(s.lang);
+        qualities.push({
+          height: 0,
+          url: s.url,
+          bitrate: 0,
+          label: labelParts.join(' — '),
+          kind: 'subtitle' as const,
+          language: s.lang
+        });
+      }
     } catch (error) {
       console.warn('[MediaGrabber] Failed to parse DASH manifest:', error);
     }
@@ -531,11 +547,12 @@ function sanitizeFilename(name: string): string {
 }
 
 function ensureFilenameExtension(filename: string, extension: string): string {
-  const baseName = filename.replace(/\.(mp4|webm|mkv|mov|m4v|avi|ts|m3u8|mp3|m4a|aac|opus|wav|flac)$/i, '');
+  const baseName = filename.replace(/\.(mp4|webm|mkv|mov|m4v|avi|ts|m3u8|mp3|m4a|aac|opus|wav|flac|vtt|srt|ttml)$/i, '');
   return `${baseName}.${extension.replace(/^\./, '')}`;
 }
 
 function getDefaultExtension(video: VideoInfo, type: VideoInfo['type']): string {
+  if (video.qualities[0]?.kind === 'subtitle') return video.qualities[0]?.ext || 'vtt';
   if (type === 'webm') return 'webm';
   if (video.qualities[0]?.ext === 'mp3') return 'mp3';
   return 'mp4';
@@ -559,6 +576,8 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
 
   if (type === 'hls' || type === 'dash') {
     // FFmpeg convert path
+    const isSubtitle = video.qualities[0]?.kind === 'subtitle';
+    const codecArg = isSubtitle ? ['-c:s', 'copy'] : ['-c', 'copy'];
     const downloadKey = `convert_${Date.now()}`;
     const outputPath = joinOutputPath(directory, outFilename);
 
@@ -572,7 +591,50 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
 
     // Start ffmpeg asynchronously — progress comes via convertOutput push
     nativeClient.convert(
-      ['-i', video.url, '-c', 'copy', '-y', outputPath],
+      ['-i', video.url, ...codecArg, '-y', outputPath],
+      { progressTime: 1000, startHandler: downloadKey }
+    ).then(result => {
+      if (result.exitCode === 0) {
+        notify('Download complete', outFilename);
+        popupPorts.forEach(port => {
+          port.postMessage({ type: 'DOWNLOAD_COMPLETE', downloadId: downloadKey, outputPath });
+        });
+      } else {
+        notify('Download failed', outFilename);
+        popupPorts.forEach(port => {
+          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: `FFmpeg exit code ${result.exitCode}: ${result.stderr}` });
+        });
+      }
+      activeDownloads.delete(downloadKey);
+    }).catch(err => {
+      notify('Download failed', err.message);
+      popupPorts.forEach(port => {
+        port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: err.message });
+      });
+      activeDownloads.delete(downloadKey);
+    });
+
+    return { success: true, downloadId: downloadKey };
+  } else if (video.type === 'mse') {
+    // MSE stream — use FFmpeg with captured segment URLs if available
+    const downloadKey = `convert_${Date.now()}`;
+    const outputPath = joinOutputPath(directory, outFilename);
+    const formatArgs = video.qualities[0]?.formatArgs;
+
+    activeDownloads.set(downloadKey, {
+      type: 'convert',
+      video,
+      directory,
+      filename: outFilename,
+      tabId
+    });
+
+    const ffmpegArgs = formatArgs && formatArgs.length > 0
+      ? [...formatArgs, '-y', outputPath]
+      : ['-i', video.url, '-c', 'copy', '-y', outputPath];
+
+    nativeClient.convert(
+      ffmpegArgs,
       { progressTime: 1000, startHandler: downloadKey }
     ).then(result => {
       if (result.exitCode === 0) {
@@ -776,7 +838,9 @@ function normalizeYtdlpQualities(url: string, qualities: any[]): VideoInfo['qual
       formatId: q.formatId,
       ext: q.ext,
       fps: Number(q.fps) || undefined,
-      fileSize: Number(q.fileSize) || undefined
+      fileSize: Number(q.fileSize) || undefined,
+      kind: q.kind,
+      language: q.language
     }));
 }
 

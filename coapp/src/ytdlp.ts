@@ -158,6 +158,42 @@ function buildYtDlpQualities(info: any, url: string): any[] {
     });
   }
 
+  const manualSubs = info?.subtitles || {};
+  const autoSubs = info?.automatic_captions || {};
+
+  for (const [lang, subs] of Object.entries(manualSubs)) {
+    if (!Array.isArray(subs) || subs.length === 0) continue;
+    const best = (subs as any[]).find(s => s.ext === 'vtt') || (subs as any[]).find(s => s.ext === 'srt') || subs[0];
+    if (best) {
+      qualities.push({
+        height: 0,
+        url,
+        label: `Subtitles — ${lang}`,
+        kind: 'subtitle',
+        language: lang,
+        formatArgs: ['--write-subs', '--sub-lang', lang, '--sub-format', best.ext, '--skip-download'],
+        ext: best.ext
+      });
+    }
+  }
+
+  for (const [lang, subs] of Object.entries(autoSubs)) {
+    if (!Array.isArray(subs) || subs.length === 0) continue;
+    if (manualSubs[lang]) continue;
+    const best = (subs as any[]).find(s => s.ext === 'vtt') || (subs as any[]).find(s => s.ext === 'srt') || subs[0];
+    if (best) {
+      qualities.push({
+        height: 0,
+        url,
+        label: `Subtitles — ${lang} (auto)`,
+        kind: 'subtitle',
+        language: lang,
+        formatArgs: ['--write-auto-subs', '--sub-lang', lang, '--sub-format', best.ext, '--skip-download'],
+        ext: best.ext
+      });
+    }
+  }
+
   return qualities;
 }
 

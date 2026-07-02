@@ -39,7 +39,7 @@ export interface VideoInfo {
   id: string;
   title: string;
   url: string;
-  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp';
+  type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp' | 'mse';
   qualities: VideoQuality[];
   childUrls?: string[];
   thumbnail?: string;

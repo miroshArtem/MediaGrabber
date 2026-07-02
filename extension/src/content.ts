@@ -4,7 +4,7 @@
 import { VideoInfo, VideoQuality } from './lib/types';
 
 interface DetectedMedia {
-  type: 'hls' | 'dash' | 'mp4' | 'webm' | 'direct';
+  type: 'hls' | 'dash' | 'mp4' | 'webm' | 'direct' | 'mse';
   url: string;
   qualities?: VideoQuality[];
   pageUrl: string;
@@ -16,14 +16,100 @@ class MediaDetector {
   private detectedVideos: VideoInfo[] = [];
   private lastMetadataKey = '';
   private metadataTimer: number | undefined;
+  private mseState: { blobUrl?: string; mimeType?: string; codecs?: string; totalBytes: number; segmentUrls: string[]; initSegmentUrl?: string; duration?: number } = {
+    totalBytes: 0,
+    segmentUrls: []
+  };
 
   constructor() {
+    this.setupMSEListener();
     this.setupDOMObserver();
     this.scanExistingMedia();
     this.scheduleMetadataSend();
 
     document.addEventListener('DOMContentLoaded', () => this.sendPageMetadata(), { once: true });
     window.addEventListener('load', () => this.sendPageMetadata(), { once: true });
+  }
+
+  private setupMSEListener(): void {
+    window.addEventListener('message', (event) => {
+      if (event.source !== window || !event.data || event.data.source !== 'MediaGrabber-MSE') return;
+
+      const msg = event.data;
+      switch (msg.type) {
+        case 'source-buffer':
+          this.mseState.blobUrl = msg.blobUrl;
+          this.mseState.mimeType = msg.mimeType;
+          this.mseState.codecs = msg.codecs;
+          this.sendMSEToBackground();
+          break;
+
+        case 'segment-url':
+          if (msg.isInit && !this.mseState.initSegmentUrl) {
+            this.mseState.initSegmentUrl = msg.url;
+          }
+          if (this.mseState.segmentUrls.length < 500 && !this.mseState.segmentUrls.includes(msg.url)) {
+            this.mseState.segmentUrls.push(msg.url);
+          }
+          if (this.mseState.segmentUrls.length === 1 || this.mseState.segmentUrls.length % 20 === 0) {
+            this.sendMSEToBackground();
+          }
+          break;
+
+        case 'duration':
+          this.mseState.duration = msg.duration;
+          this.sendMSEToBackground();
+          break;
+
+        case 'progress':
+          this.mseState.totalBytes = msg.totalBytes;
+          break;
+      }
+    });
+  }
+
+  private sendMSEToBackground(): void {
+    if (!this.mseState.mimeType) return;
+    const url = this.mseState.initSegmentUrl || this.mseState.blobUrl || '';
+    if (!url) return;
+
+    const codec = this.mseState.codecs || '';
+    const isAudioOnly = this.mseState.mimeType.startsWith('audio/');
+
+    const qualities: VideoQuality[] = [{
+      height: 0,
+      url,
+      bitrate: 0,
+      label: isAudioOnly ? 'Audio' : (codec ? codec.split(',')[0] : 'MSE Stream'),
+      kind: isAudioOnly ? 'audio' : 'video'
+    }];
+
+    if (this.mseState.segmentUrls.length > 0 && this.mseState.initSegmentUrl) {
+      qualities.push({
+        height: 0,
+        url: this.mseState.initSegmentUrl,
+        bitrate: 0,
+        label: 'All Segments',
+        kind: 'video',
+        formatArgs: ['-i', this.mseState.initSegmentUrl, ...this.mseState.segmentUrls.slice(1, 200).flatMap(u => ['-i', u]), '-c', 'copy']
+      });
+    }
+
+    const media: DetectedMedia = {
+      type: 'mse',
+      url,
+      qualities,
+      pageUrl: window.location.href
+    };
+
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'VIDEO_DETECTED', video: { ...media, id: `mse_${Date.now()}`, title: document.title || 'MSE Stream' } },
+        () => { void chrome.runtime.lastError; }
+      );
+    } catch {
+      // Extension context invalidated
+    }
   }
 
   /**
@@ -149,12 +235,10 @@ class MediaDetector {
 
     try {
       chrome.runtime.sendMessage({ type: 'PAGE_METADATA', metadata }, () => {
-        if (chrome.runtime.lastError) {
-          console.error('[MediaGrabber] Failed to send page metadata:', chrome.runtime.lastError);
-        }
+        void chrome.runtime.lastError;
       });
-    } catch (e) {
-      console.error('[MediaGrabber] Error sending page metadata:', e);
+    } catch {
+      // Extension context invalidated (extension was reloaded)
     }
   }
 
@@ -226,13 +310,11 @@ class MediaDetector {
           duration: this.getVideoDuration(),
           thumbnail: this.extractThumbnail()
         }
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('[MediaGrabber] Failed to send to background:', chrome.runtime.lastError);
-        }
+      }, () => {
+        void chrome.runtime.lastError;
       });
-    } catch (e) {
-      console.error('[MediaGrabber] Error sending to background:', e);
+    } catch {
+      // Extension context invalidated (extension was reloaded)
     }
   }
 

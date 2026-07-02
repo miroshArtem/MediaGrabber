@@ -451,6 +451,10 @@ body {
   letter-spacing: 0.5px;
 }
 
+.quality-kind-sub {
+  background: #e8a735;
+}
+
 .quality-size {
   font-size: 11px;
   color: var(--accent-text);
