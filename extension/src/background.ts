@@ -376,6 +376,31 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
     } catch {
       // ignore — some servers don't support HEAD
     }
+
+    try {
+      await ensureCoAppConnected();
+      const probe = await nativeClient.probe(url, true);
+      const vStream = probe?.streams?.find((s: any) => s.codec_type === 'video');
+      if (vStream) {
+        const height = parseInt(vStream.height, 10) || 0;
+        const width = parseInt(vStream.width, 10) || 0;
+        qualities = [{
+          height,
+          width: width || undefined,
+          bitrate: 0,
+          url,
+          label: M3U8ParserWrapper.getQualityName(height)
+        }];
+      }
+      if (probe?.format?.duration) {
+        duration = parseFloat(probe.format.duration);
+      }
+      if (probe?.format?.size && !fileSize) {
+        fileSize = parseInt(probe.format.size, 10);
+      }
+    } catch {
+      // ffprobe unavailable or URL unreachable — keep HEAD-only result
+    }
   }
 
   upsertVideo(tabId, {
