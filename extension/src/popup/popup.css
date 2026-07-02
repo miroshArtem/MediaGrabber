@@ -439,6 +439,18 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.quality-kind {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .quality-size {
   font-size: 11px;
   color: var(--accent-text);

@@ -334,8 +334,26 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
         height: variant.height || 0,
         width: variant.width,
         bitrate: variant.bandwidth,
-        url: variant.url
+        url: variant.url,
+        label: variant.name,
+        kind: 'video' as const
       }));
+
+      for (const r of parsed.mediaRenditions || []) {
+        if (!r.uri || r.type === 'CLOSED-CAPTIONS') continue;
+        const labelParts: string[] = [];
+        if (r.type === 'AUDIO') labelParts.push('Audio');
+        if (r.name) labelParts.push(r.name);
+        else if (r.language) labelParts.push(r.language);
+        qualities.push({
+          height: 0,
+          url: r.uri,
+          bitrate: 0,
+          label: labelParts.join(' — ') || 'Alternate track',
+          kind: r.type === 'AUDIO' ? 'audio' as const : undefined,
+          language: r.language
+        });
+      }
 
       // Fallback: fetch media playlist for duration if master had none
       if (!duration && parsed.variants.length > 0) {

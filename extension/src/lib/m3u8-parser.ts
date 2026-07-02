@@ -10,9 +10,20 @@ export interface M3U8StreamInfo {
   name?: string;
 }
 
+export interface MediaRendition {
+  type: string;
+  groupId?: string;
+  name?: string;
+  language?: string;
+  uri?: string;
+  default?: boolean;
+  autoselect?: boolean;
+}
+
 export interface ParsedM3U8 {
   type: 'master' | 'media';
   variants: M3U8StreamInfo[];
+  mediaRenditions?: MediaRendition[];
   childUrls?: string[];
   segments?: string[];
   duration?: number;
@@ -39,6 +50,7 @@ export class M3U8ParserWrapper {
     const lines = manifest.split('\n');
     
     const variants: M3U8StreamInfo[] = [];
+    const mediaRenditions: MediaRendition[] = [];
     const childUrls: string[] = [];
     const segments: string[] = [];
     let isMaster = false;
@@ -65,10 +77,12 @@ export class M3U8ParserWrapper {
       // Alternate audio/subtitle rendition playlists referenced by the master.
       if (line.startsWith('#EXT-X-MEDIA:')) {
         isMaster = true;
-        const uriMatch = line.match(/URI="([^"]+)"/);
-        if (uriMatch && baseUrl) {
-          childUrls.push(M3U8ParserWrapper.resolveUrl(uriMatch[1], baseUrl));
+        const rendition = M3U8ParserWrapper.parseMediaRendition(line);
+        if (rendition.uri && baseUrl) {
+          rendition.uri = M3U8ParserWrapper.resolveUrl(rendition.uri, baseUrl);
+          childUrls.push(rendition.uri);
         }
+        mediaRenditions.push(rendition);
       }
       
       // Media playlist - segment
@@ -97,6 +111,7 @@ export class M3U8ParserWrapper {
     return {
       type: isMaster ? 'master' : 'media',
       variants,
+      mediaRenditions: mediaRenditions.length > 0 ? mediaRenditions : undefined,
       childUrls: childUrls.length > 0 ? Array.from(new Set(childUrls)) : undefined,
       segments: segments.length > 0 ? segments : undefined,
       duration: segments.length > 0 ? totalDuration || segments.length * targetDuration : undefined
@@ -112,29 +127,52 @@ export class M3U8ParserWrapper {
       bandwidth: 0
     };
     
-    // Parse BANDWIDTH
     const bwMatch = line.match(/BANDWIDTH=(\d+)/);
     if (bwMatch) {
       info.bandwidth = parseInt(bwMatch[1]);
     }
     
-    // Parse RESOLUTION
     const resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
     if (resMatch) {
       info.width = parseInt(resMatch[1]);
       info.height = parseInt(resMatch[2]);
     }
     
-    // Parse CODECS
     const codecsMatch = line.match(/CODECS="([^"]+)"/);
     if (codecsMatch) {
       info.codecs = codecsMatch[1];
     }
     
-    // Generate quality name
     info.name = M3U8ParserWrapper.getQualityName(info.height);
     
     return info;
+  }
+
+  private static parseMediaRendition(line: string): MediaRendition {
+    const rendition: MediaRendition = { type: 'AUDIO' };
+
+    const typeMatch = line.match(/TYPE=([A-Z\-]+)/);
+    if (typeMatch) rendition.type = typeMatch[1];
+
+    const groupIdMatch = line.match(/GROUP-ID="([^"]+)"/);
+    if (groupIdMatch) rendition.groupId = groupIdMatch[1];
+
+    const nameMatch = line.match(/NAME="([^"]+)"/);
+    if (nameMatch) rendition.name = nameMatch[1];
+
+    const langMatch = line.match(/LANGUAGE="([^"]+)"/);
+    if (langMatch) rendition.language = langMatch[1];
+
+    const uriMatch = line.match(/URI="([^"]+)"/);
+    if (uriMatch) rendition.uri = uriMatch[1];
+
+    const defaultMatch = line.match(/DEFAULT=(YES|NO)/);
+    if (defaultMatch) rendition.default = defaultMatch[1] === 'YES';
+
+    const autoselectMatch = line.match(/AUTOSELECT=(YES|NO)/);
+    if (autoselectMatch) rendition.autoselect = autoselectMatch[1] === 'YES';
+
+    return rendition;
   }
   
   /**

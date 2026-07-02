@@ -31,6 +31,8 @@ export interface VideoQuality {
   ext?: string;
   fps?: number;
   fileSize?: number;
+  kind?: 'video' | 'audio' | 'subtitle';
+  language?: string;
 }
 
 export interface VideoInfo {

@@ -15,6 +15,8 @@ interface VideoQuality {
   ext?: string;
   fps?: number;
   fileSize?: number;
+  kind?: 'video' | 'audio' | 'subtitle';
+  language?: string;
 }
 
 interface VideoInfo {
@@ -41,6 +43,8 @@ interface QualityOption {
   ext?: string;
   fps?: number;
   fileSize?: number;
+  kind?: 'video' | 'audio' | 'subtitle';
+  language?: string;
 }
 
 let port: chrome.runtime.Port;
@@ -294,7 +298,9 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
     formatId: q.formatId,
     ext: q.ext,
     fps: q.fps,
-    fileSize: q.fileSize
+    fileSize: q.fileSize,
+    kind: q.kind,
+    language: q.language
   }));
   
   // If no qualities from detection, use direct URL
@@ -368,6 +374,7 @@ function renderQualityList(): void {
     option.innerHTML = `
       <input type="radio" name="quality" value="${index}" class="quality-radio">
       <span class="quality-label">${q.label}</span>
+      ${q.kind === 'audio' ? '<span class="quality-kind">Audio</span>' : ''}
       ${q.resolution ? `<span class="quality-bandwidth">${q.resolution}</span>` : ''}
       <span class="quality-bandwidth">${q.bandwidthLabel}</span>
       ${q.sizeLabel ? `<span class="quality-size">${q.sizeLabel}</span>` : ''}
