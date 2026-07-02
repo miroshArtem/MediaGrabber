@@ -28,6 +28,8 @@ const activeDownloads = new Map<string, {
   video?: VideoInfo;
   directory: string;
   filename: string;
+  tabId?: number;
+  lastProgress?: { percent: number; speed?: string; bytesReceived?: number; totalBytes?: number; eta?: number };
 }>();
 
 // Popup connections
@@ -56,7 +58,7 @@ function notify(title: string, message: string): void {
     if (settings.showNotifications) {
       chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'public/icons/icon-128.png',
+        iconUrl: chrome.runtime.getURL('public/icons/icon-128.png'),
         title: `MediaGrabber — ${title}`,
         message
       });
@@ -72,6 +74,7 @@ nativeClient.listen({
       if (dl.type !== 'convert' || !dl.video) continue;
       const duration = dl.video.duration || 0;
       const percent = duration > 0 ? Math.min(100, (currentSeconds / duration) * 100) : 0;
+      dl.lastProgress = { percent, speed: info.speed || '' };
       popupPorts.forEach(port => {
         port.postMessage({
           type: 'DOWNLOAD_PROGRESS',
@@ -365,7 +368,7 @@ function handlePopupMessage(port: chrome.runtime.Port, msg: any): void {
       break;
 
     case 'DOWNLOAD':
-      startDownload(msg.video, msg.filename)
+      startDownload(msg.video, msg.filename, msg.tabId)
         .then(result => port.postMessage({ type: 'DOWNLOAD_STARTED', ...result }))
         .catch(err => port.postMessage({ type: 'ERROR', message: err.message }));
       break;
@@ -375,6 +378,24 @@ function handlePopupMessage(port: chrome.runtime.Port, msg: any): void {
         .then(result => port.postMessage({ type: 'DOWNLOAD_CANCELLED', ...result }))
         .catch(err => port.postMessage({ type: 'ERROR', message: err.message }));
       break;
+
+    case 'GET_ACTIVE_DOWNLOAD': {
+      const tabId = msg.tabId;
+      const entry = [...activeDownloads.entries()].find(([, dl]) => dl.tabId === tabId);
+      if (entry) {
+        const [key, dl] = entry;
+        port.postMessage({
+          type: 'ACTIVE_DOWNLOAD',
+          downloadId: key,
+          video: dl.video,
+          filename: dl.filename,
+          progress: dl.lastProgress || { percent: 0 }
+        });
+      } else {
+        port.postMessage({ type: 'NO_ACTIVE_DOWNLOAD' });
+      }
+      break;
+    }
   }
 }
 
@@ -416,7 +437,7 @@ function joinOutputPath(directory: string, filename: string): string {
   return `${directory.replace(/[\\/]$/, '')}${separator}${filename}`;
 }
 
-async function startDownload(video: VideoInfo, filename?: string): Promise<any> {
+async function startDownload(video: VideoInfo, filename?: string, tabId?: number): Promise<any> {
   await ensureCoAppConnected();
 
   const type = getMediaType(video.url);
@@ -432,7 +453,8 @@ async function startDownload(video: VideoInfo, filename?: string): Promise<any> 
       type: 'convert',
       video,
       directory,
-      filename: outFilename
+      filename: outFilename,
+      tabId
     });
 
     // Start ffmpeg asynchronously — progress comes via convertOutput push
@@ -475,7 +497,8 @@ async function startDownload(video: VideoInfo, filename?: string): Promise<any> 
       downloadId,
       video,
       directory,
-      filename: outFilename
+      filename: outFilename,
+      tabId
     });
 
     // Poll for direct download progress (CoApp pushes complete/error, but we poll for bytes)
@@ -496,6 +519,11 @@ function startDirectProgressPolling(downloadKey: string, downloadId: number, dur
 
       const dl = results[0];
       const percent = dl.totalBytes > 0 ? (dl.bytesReceived / dl.totalBytes) * 100 : 0;
+
+      const activeDl = activeDownloads.get(downloadKey);
+      if (activeDl) {
+        activeDl.lastProgress = { percent, bytesReceived: dl.bytesReceived, totalBytes: dl.totalBytes };
+      }
 
       popupPorts.forEach(port => {
         port.postMessage({

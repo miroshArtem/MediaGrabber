@@ -64,6 +64,12 @@ function initPopup(): void {
       case 'DOWNLOAD_ERROR':
         showError(msg.error || 'Download failed');
         break;
+      case 'ACTIVE_DOWNLOAD':
+        restoreDownloadUI(msg.downloadId, msg.filename, msg.progress);
+        break;
+      case 'NO_ACTIVE_DOWNLOAD':
+        requestMediaList();
+        break;
       case 'ERROR':
         showError(msg.message);
         break;
@@ -85,7 +91,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function initializePopupState(): Promise<void> {
   activeTabId = await getActiveTabId();
-  requestMediaList();
+  if (port && activeTabId != null) {
+    updateStatus('Checking for media…');
+    port.postMessage({ type: 'GET_ACTIVE_DOWNLOAD', tabId: activeTabId });
+  } else {
+    requestMediaList();
+  }
 }
 
 async function getActiveTabId(): Promise<number | null> {
@@ -391,6 +402,7 @@ function startDownload(video: VideoInfo, quality: QualityOption): void {
   if (port) {
     port.postMessage({
       type: 'DOWNLOAD',
+      tabId: activeTabId,
       video: {
         ...video,
         url: quality.url,
@@ -422,6 +434,32 @@ function showDownloadingUI(): void {
   
   // Reset progress
   updateProgressUI({ percent: 0, speed: 0 });
+}
+
+function restoreDownloadUI(downloadId: string, filename: string, progress: any): void {
+  currentDownloadId = downloadId;
+
+  const emptyState = document.getElementById('empty-state')!;
+  const videoList = document.getElementById('video-list')!;
+  const mediaDetails = document.getElementById('media-details')!;
+  const downloadSection = document.getElementById('download-section')!;
+  const downloadProgress = document.getElementById('download-progress')!;
+  const error = document.getElementById('error')!;
+
+  emptyState.classList.add('hidden');
+  videoList.classList.add('hidden');
+  mediaDetails.classList.add('hidden');
+  downloadSection.classList.add('hidden');
+  error.classList.add('hidden');
+  downloadProgress.classList.remove('hidden');
+
+  const filenameEl = document.getElementById('progress-filename');
+  if (filenameEl && filename) {
+    filenameEl.textContent = filename;
+  }
+
+  updateProgressUI(progress || { percent: 0 });
+  updateStatus('Downloading…', 'info');
 }
 
 function showDownloadStarted(downloadId: string): void {
