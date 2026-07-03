@@ -43,7 +43,14 @@ coverage/
 # FFmpeg binaries (downloaded separately)
 coapp/ffmpeg/**/ffmpeg.exe
 coapp/ffmpeg/**/ffmpeg
+coapp/ffmpeg/**/ffprobe.exe
+coapp/ffmpeg/**/ffprobe
 !coapp/ffmpeg/**/.gitkeep
+
+# yt-dlp binaries (downloaded separately)
+coapp/ytdlp/**/yt-dlp.exe
+coapp/ytdlp/**/yt-dlp
+!coapp/ytdlp/**/.gitkeep
 
 # Compiled extension JS (generated from TypeScript)
 extension/src/*.js
