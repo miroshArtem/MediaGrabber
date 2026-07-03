@@ -40,7 +40,7 @@ npm run dev:coapp           # coapp tsc --watch (works)
 cd coapp && npm start        # node dist/main.js
 
 # Extension bundling (esbuild, separate from tsc build)
-cd extension && npm run bundle   # produces dist/background.js, content.js, popup.js
+cd extension && npm run bundle   # produces dist/background.js, content.js, mse-inject.js, popup.js, settings.js
 
 # Native messaging host registration (Windows/macOS/Linux)
 cd coapp && node dist/native-autoinstall.js register [extension-id...]
@@ -87,6 +87,34 @@ Place the binary manually before downloads will work. `ffprobe` is expected alon
 ## got (HTTP client)
 
 `coapp/src/downloads.ts` uses `got` v12+ which is **ESM-only**, but the CoApp is CommonJS. A `new Function('specifier', 'return import(specifier)')` wrapper prevents TypeScript from rewriting `import()` into `require()` (which would throw `ERR_REQUIRE_ESM`). Do not remove this wrapper.
+
+## Content Scripts & MSE Hooking
+
+The manifest registers **two** content scripts on `<all_urls>`, both at `document_start`:
+
+| Script | World | Purpose |
+|--------|-------|---------|
+| `dist/content.js` | isolated (default) | DOM scanning, media detection, MSE listener (`window.postMessage`), sends page metadata |
+| `dist/mse-inject.js` | `"MAIN"` | Hooks `MediaSource.addSourceBuffer`/`SourceBuffer.appendBuffer` to capture segment URLs; communicates via `window.postMessage` → content.js → background |
+
+Key points:
+- `mse-inject.ts` is a self-contained IIFE (esbuild `--format=iife`); it has **no access to `chrome.*` APIs** — only `window.postMessage`.
+- `mse-inject.ts` uses `__MediaGrabberMSEHooked` guard to avoid double-hooking.
+- `content.ts` silently catches `Extension context invalidated` errors on every `chrome.runtime.sendMessage` call (extension reload/uninstall).
+
+## HLS & DASH Manifest Parsing
+
+Both parsers (`extension/src/lib/m3u8-parser.ts`, `extension/src/lib/dash-parser.ts`) are **regex-based** — DOMParser is not available in MV3 service workers.
+
+**Referer for CDN sites:** `fetchAndParse(url, referer?)` accepts an optional `referer` parameter and passes it as `fetch(url, { referrer })`. Some CDNs reject requests that lack a Referer header. Always pass `pageUrl` from page metadata when calling from `handleInterceptedMedia`.
+
+**Redirect-chain dedup:** `handleInterceptedMedia` deduplicates HLS/DASH manifests by pathname only (ignoring hostname), because CDN redirect chains produce multiple intercepted URLs with identical paths but different hostnames (e.g. `z.cdn.com/.../hls.m3u8` → `marten.z.cdn.com/.../hls.m3u8`).
+
+**Quality kinds:** `VideoQuality.kind` can be `'video'`, `'audio'`, or `'subtitle'`. Audio tracks come from `EXT-X-MEDIA TYPE=AUDIO`, subtitles from `EXT-X-MEDIA TYPE=SUBTITLES` or DASH text AdaptationSets.
+
+## YouTube Handling
+
+YouTube videos are handled **exclusively via yt-dlp** (`type: 'ytdlp'`). Ordinary detected media entries on YouTube tabs are ignored in `commitVideos`. The yt-dlp RPC (`ytdlpFormats`) runs in the CoApp and returns real `format_id`-based qualities.
 
 ## Working with Agent-Plan
 
