@@ -63,5 +63,6 @@ coapp/dist/
 
 
 .opencode/
+.agents/
 agent-plan/
 AGENTS.md
