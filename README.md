@@ -20,7 +20,7 @@
 
 ## See It In Action
 
-https://github.com/miroshArtem/MediaGrabber/raw/refs/heads/main/docs/media/mediagrabber-promo.mp4
+https://github.com/user-attachments/assets/05a171ad-6ba6-4ab1-8d7c-9ef7cbdec57d
 
 A browser extension that catches video streams as they pass through the browser and lets you download them in whatever quality you want. Think Video DownloadHelper, but modern, open source, and built for Manifest V3.
 
