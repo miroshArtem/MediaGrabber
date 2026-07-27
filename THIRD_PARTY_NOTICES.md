@@ -4,10 +4,11 @@ MediaGrabber can install and execute the following third-party tools as separate
 
 ## FFmpeg
 
-Windows release builds currently use the FFmpeg Essentials build from gyan.dev. These builds are distributed under GPLv3 according to the provider's build information.
+Windows release builds currently use the FFmpeg 8.1.2 Essentials build from GyanD/codexffmpeg. These builds are distributed under GPLv3 according to the provider's build information.
 
 - Project: https://ffmpeg.org/
 - Binary provider: https://www.gyan.dev/ffmpeg/builds/
+- Exact binary release: https://github.com/GyanD/codexffmpeg/releases/tag/8.1.2
 - Source and license information must be kept available with every binary release.
 
 The FFmpeg executable is a separate process and is not part of the MediaGrabber source code.

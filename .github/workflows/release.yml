@@ -38,7 +38,7 @@ jobs:
           New-Item -ItemType Directory -Force release-runtime | Out-Null
 
           $ffmpegArchive = Join-Path $env:TEMP 'ffmpeg-8.0.1-essentials_build.zip'
-          Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-8.0.1-essentials_build.zip' -OutFile $ffmpegArchive
+          Invoke-WebRequest -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip' -OutFile $ffmpegArchive
           Expand-Archive -Path $ffmpegArchive -DestinationPath (Join-Path $env:TEMP 'mediagrabber-ffmpeg') -Force
           $ffmpegRoot = Get-ChildItem (Join-Path $env:TEMP 'mediagrabber-ffmpeg') -Directory | Select-Object -First 1
           Copy-Item (Join-Path $ffmpegRoot.FullName 'bin/ffmpeg.exe') 'release-runtime/ffmpeg.exe'
