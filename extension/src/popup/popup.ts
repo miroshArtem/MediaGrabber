@@ -518,6 +518,9 @@ function updateProgressUI(progress: any): void {
   const speedEl = document.getElementById('progress-speed');
   const etaEl = document.getElementById('progress-eta');
 
+  if (speedEl) speedEl.textContent = '';
+  if (etaEl) etaEl.textContent = '';
+
   const percent = typeof progress.percent === 'number' ? progress.percent : 0;
   const hasMeasuredProgress = percent > 0;
 
@@ -538,9 +541,12 @@ function updateProgressUI(progress: any): void {
   // Handle FFmpeg speed (string like "1.5x") vs direct download (bytes)
   if (speedEl && progress.speed) {
     if (typeof progress.speed === 'string') {
-      speedEl.textContent = progress.speed;
+      const label = progress.speed.trim().toLowerCase().endsWith('x')
+        ? 'Processing speed'
+        : 'Download speed';
+      speedEl.textContent = `${label}: ${progress.speed}`;
     } else if (typeof progress.speed === 'number' && progress.speed > 0) {
-      speedEl.textContent = formatSpeed(progress.speed);
+      speedEl.textContent = `Download speed: ${formatSpeed(progress.speed)}`;
     }
   }
 

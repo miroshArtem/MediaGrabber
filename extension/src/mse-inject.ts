@@ -17,9 +17,50 @@
     duration: 0
   };
 
-  function postToContentScript(payload: any): void {
-    window.postMessage(Object.assign({ source: 'MediaGrabber-MSE' }, payload), '*');
+  let pageGeneration = 0;
+  const mediaSourceGenerations = new WeakMap<MediaSource, number>();
+  const sourceBufferGenerations = new WeakMap<SourceBuffer, number>();
+
+  function postToContentScript(payload: any, generation = pageGeneration): void {
+    if (generation !== pageGeneration) return;
+    window.postMessage(Object.assign({
+      source: 'MediaGrabber-MSE',
+      pageUrl: window.location.href,
+      generation
+    }, payload), '*');
   }
+
+  function resetMSEState(): void {
+    MSE_STATE.blobUrl = null;
+    MSE_STATE.mimeType = null;
+    MSE_STATE.codecs = null;
+    MSE_STATE.totalBytes = 0;
+    MSE_STATE.segmentCount = 0;
+    MSE_STATE.segmentUrls = [];
+    MSE_STATE.initSegmentUrl = null;
+    MSE_STATE.duration = 0;
+  }
+
+  function notifyNavigation(): void {
+    pageGeneration++;
+    resetMSEState();
+    postToContentScript({ type: 'navigation' });
+  }
+
+  const origPushState = history.pushState;
+  history.pushState = function(): void {
+    origPushState.apply(this, arguments as any);
+    notifyNavigation();
+  };
+
+  const origReplaceState = history.replaceState;
+  history.replaceState = function(): void {
+    origReplaceState.apply(this, arguments as any);
+    notifyNavigation();
+  };
+
+  window.addEventListener('popstate', notifyNavigation);
+  window.addEventListener('hashchange', notifyNavigation);
 
   function extractCodecs(mime: string): string | null {
     const m = mime.match(/codecs="([^"]+)"/);
@@ -47,6 +88,7 @@
   URL.createObjectURL = function(obj: any): string {
     const url = origCreateObjectURL.call(this, obj);
     if (obj instanceof MediaSource) {
+      mediaSourceGenerations.set(obj, pageGeneration);
       MSE_STATE.blobUrl = url;
       postToContentScript({ type: 'mse-detected', blobUrl: url });
     }
@@ -55,7 +97,8 @@
 
   const origAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
   MediaSource.prototype.addSourceBuffer = function(mimeType: string): SourceBuffer {
-    if (isVideoMime(mimeType)) {
+    const generation = mediaSourceGenerations.get(this) ?? pageGeneration;
+    if (isVideoMime(mimeType) && generation === pageGeneration) {
       MSE_STATE.mimeType = mimeType;
       MSE_STATE.codecs = extractCodecs(mimeType);
       postToContentScript({
@@ -65,17 +108,23 @@
         codecs: MSE_STATE.codecs
       });
     }
-    return origAddSourceBuffer.call(this, mimeType);
+    const sourceBuffer = origAddSourceBuffer.call(this, mimeType);
+    sourceBufferGenerations.set(sourceBuffer, generation);
+    return sourceBuffer;
   };
 
   const origAppendBuffer = SourceBuffer.prototype.appendBuffer;
   SourceBuffer.prototype.appendBuffer = function(data: any): void {
     try {
-      if (data instanceof ArrayBuffer) {
+      const generation = sourceBufferGenerations.get(this);
+      if (generation !== pageGeneration) return;
+
+      if (generation === pageGeneration && data instanceof ArrayBuffer) {
         MSE_STATE.totalBytes += data.byteLength;
-      } else if (data && data.buffer) {
+      } else if (generation === pageGeneration && data && data.buffer) {
         MSE_STATE.totalBytes += data.buffer.byteLength;
       }
+
       MSE_STATE.segmentCount++;
 
       if (MSE_STATE.segmentCount === 1) {
@@ -98,8 +147,9 @@
         });
       }
     } catch {}
-
-    return origAppendBuffer.call(this, data);
+    finally {
+      origAppendBuffer.call(this, data);
+    }
   };
 
   const origDurationDesc = Object.getOwnPropertyDescriptor(MediaSource.prototype, 'duration');
@@ -108,6 +158,10 @@
     Object.defineProperty(MediaSource.prototype, 'duration', {
       get: origDurationDesc.get,
       set: function(val: number) {
+        const generation = mediaSourceGenerations.get(this);
+        if (generation !== undefined && generation !== pageGeneration) {
+          return origDurationSet.call(this, val);
+        }
         MSE_STATE.duration = val;
         postToContentScript({ type: 'duration', blobUrl: MSE_STATE.blobUrl, duration: val });
         return origDurationSet.call(this, val);
@@ -119,38 +173,36 @@
   const origFetch = window.fetch;
   window.fetch = function(input: any, init?: any): Promise<Response> {
     const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
-    if (looksLikeSegment(url)) {
-      if (MSE_STATE.segmentUrls.length < 500) {
-        MSE_STATE.segmentUrls.push(url);
-        if (url.indexOf('init') >= 0 || MSE_STATE.segmentUrls.length === 1) {
-          MSE_STATE.initSegmentUrl = MSE_STATE.initSegmentUrl || url;
-        }
-        postToContentScript({
-          type: 'segment-url',
-          url,
-          isInit: url.indexOf('init') >= 0,
-          totalUrls: MSE_STATE.segmentUrls.length
-        });
+    const generation = pageGeneration;
+    if (looksLikeSegment(url) && generation === pageGeneration && MSE_STATE.segmentUrls.length < 500) {
+      MSE_STATE.segmentUrls.push(url);
+      if (url.indexOf('init') >= 0 || MSE_STATE.segmentUrls.length === 1) {
+        MSE_STATE.initSegmentUrl = MSE_STATE.initSegmentUrl || url;
       }
+      postToContentScript({
+        type: 'segment-url',
+        url,
+        isInit: url.indexOf('init') >= 0,
+        totalUrls: MSE_STATE.segmentUrls.length
+      }, generation);
     }
     return origFetch.apply(this, arguments as any);
   };
 
   const origXHROpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method: string, url: string): void {
-    if (looksLikeSegment(url)) {
-      if (MSE_STATE.segmentUrls.length < 500) {
-        MSE_STATE.segmentUrls.push(url);
-        if (url.indexOf('init') >= 0 || MSE_STATE.segmentUrls.length === 1) {
-          MSE_STATE.initSegmentUrl = MSE_STATE.initSegmentUrl || url;
-        }
-        postToContentScript({
-          type: 'segment-url',
-          url,
-          isInit: url.indexOf('init') >= 0,
-          totalUrls: MSE_STATE.segmentUrls.length
-        });
+    const generation = pageGeneration;
+    if (looksLikeSegment(url) && generation === pageGeneration && MSE_STATE.segmentUrls.length < 500) {
+      MSE_STATE.segmentUrls.push(url);
+      if (url.indexOf('init') >= 0 || MSE_STATE.segmentUrls.length === 1) {
+        MSE_STATE.initSegmentUrl = MSE_STATE.initSegmentUrl || url;
       }
+      postToContentScript({
+        type: 'segment-url',
+        url,
+        isInit: url.indexOf('init') >= 0,
+        totalUrls: MSE_STATE.segmentUrls.length
+      }, generation);
     }
     return origXHROpen.apply(this, arguments as any);
   };

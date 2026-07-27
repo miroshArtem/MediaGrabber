@@ -8,6 +8,7 @@ interface DetectedMedia {
   url: string;
   qualities?: VideoQuality[];
   pageUrl: string;
+  generation: number;
 }
 
 class MediaDetector {
@@ -16,12 +17,15 @@ class MediaDetector {
   private detectedVideos: VideoInfo[] = [];
   private lastMetadataKey = '';
   private metadataTimer: number | undefined;
+  private pageUrl = window.location.href;
+  private pageGeneration = 0;
   private mseState: { blobUrl?: string; mimeType?: string; codecs?: string; totalBytes: number; segmentUrls: string[]; initSegmentUrl?: string; duration?: number } = {
     totalBytes: 0,
     segmentUrls: []
   };
 
   constructor() {
+    this.setupNavigationListener();
     this.setupMSEListener();
     this.setupDOMObserver();
     this.scanExistingMedia();
@@ -31,11 +35,55 @@ class MediaDetector {
     window.addEventListener('load', () => this.sendPageMetadata(), { once: true });
   }
 
+  private setupNavigationListener(): void {
+    const checkForUrlChange = () => this.handleNavigation(window.location.href);
+
+    window.addEventListener('popstate', checkForUrlChange);
+    window.addEventListener('hashchange', checkForUrlChange);
+  }
+
+  private handleNavigation(pageUrl: string, generation?: number): void {
+    if (pageUrl === this.pageUrl && (generation === undefined || generation <= this.pageGeneration)) return;
+
+    this.pageUrl = pageUrl;
+    this.pageGeneration = generation ?? this.pageGeneration + 1;
+    this.mediaUrls.clear();
+    this.manifestUrls.clear();
+    this.detectedVideos = [];
+    this.lastMetadataKey = '';
+    this.mseState = { totalBytes: 0, segmentUrls: [] };
+    this.sendNavigation(pageUrl, this.pageGeneration);
+    this.scheduleMetadataSend();
+  }
+
+  private sendNavigation(pageUrl: string, generation: number): void {
+    try {
+      chrome.runtime.sendMessage({ type: 'PAGE_NAVIGATION', pageUrl, generation }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch {
+      // Extension context invalidated (extension was reloaded)
+    }
+  }
+
   private setupMSEListener(): void {
     window.addEventListener('message', (event) => {
       if (event.source !== window || !event.data || event.data.source !== 'MediaGrabber-MSE') return;
 
       const msg = event.data;
+      if (msg.type === 'navigation') {
+        if (typeof msg.pageUrl === 'string' && typeof msg.generation === 'number') {
+          this.handleNavigation(msg.pageUrl, msg.generation);
+        }
+        return;
+      }
+      if (msg.pageUrl !== this.pageUrl || msg.generation !== this.pageGeneration) {
+        if (msg.pageUrl === window.location.href && msg.generation > this.pageGeneration) {
+          this.handleNavigation(msg.pageUrl, msg.generation);
+        }
+        if (msg.pageUrl !== this.pageUrl || msg.generation !== this.pageGeneration) return;
+      }
+
       switch (msg.type) {
         case 'source-buffer':
           this.mseState.blobUrl = msg.blobUrl;
@@ -99,7 +147,8 @@ class MediaDetector {
       type: 'mse',
       url,
       qualities,
-      pageUrl: window.location.href
+      pageUrl: this.pageUrl,
+      generation: this.pageGeneration
     };
 
     try {
@@ -227,7 +276,8 @@ class MediaDetector {
       title: this.extractTitle(),
       thumbnail: this.extractThumbnail(),
       duration: this.getVideoDuration(),
-      pageUrl: window.location.href
+      pageUrl: window.location.href,
+      generation: this.pageGeneration
     };
     const key = JSON.stringify(metadata);
     if (key === this.lastMetadataKey) return;
@@ -273,7 +323,8 @@ class MediaDetector {
     const media: DetectedMedia = {
       type,
       url,
-      pageUrl: window.location.href
+      pageUrl: window.location.href,
+      generation: this.pageGeneration
     };
 
     // Send to background script
@@ -308,7 +359,9 @@ class MediaDetector {
           type: media.type,
           qualities: media.qualities || [],
           duration: this.getVideoDuration(),
-          thumbnail: this.extractThumbnail()
+          thumbnail: this.extractThumbnail(),
+          pageUrl: media.pageUrl,
+          generation: media.generation
         }
       }, () => {
         void chrome.runtime.lastError;
@@ -401,17 +454,20 @@ class MediaDetector {
    * Fetch and parse M3U8 playlist
    */
   async fetchAndParseM3U8(url: string): Promise<void> {
+    const pageUrl = window.location.href;
+    const generation = this.pageGeneration;
     if (this.manifestUrls.has(url)) return;
     this.manifestUrls.add(url);
 
     try {
       const response = await fetch(url);
       const text = await response.text();
+      if (window.location.href !== pageUrl || this.pageUrl !== pageUrl || this.pageGeneration !== generation) return;
       const variants = this.parseM3U8Variants(text, url);
 
       if (variants.length > 0) {
         const media: VideoInfo = {
-          id: this.generateVideoId({ type: 'hls', url, pageUrl: window.location.href }),
+          id: this.generateVideoId({ type: 'hls', url, pageUrl, generation }),
           title: this.extractTitle(),
           url,
           type: 'hls',
@@ -422,7 +478,8 @@ class MediaDetector {
           type: 'hls',
           url,
           qualities: variants,
-          pageUrl: window.location.href
+          pageUrl,
+          generation
         });
       }
     } catch (e) {

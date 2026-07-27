@@ -12,6 +12,7 @@ interface PageMetadata {
   thumbnail?: string;
   duration?: number;
   pageUrl?: string;
+  generation?: number;
 }
 
 const nativeClient = new NativeClient();
@@ -21,6 +22,38 @@ const mediaByTab = new Map<number, VideoInfo[]>();
 const interceptedMediaByTab = new Map<number, Set<string>>();
 const pageMetadataByTab = new Map<number, PageMetadata>();
 const ytdlpFormatUrlByTab = new Map<number, string>();
+const pageGenerationByTab = new Map<number, number>();
+const navigationGenerationByTab = new Map<number, number>();
+const currentPageUrlByTab = new Map<number, string | null>();
+
+function getPageGeneration(tabId: number): number {
+  return pageGenerationByTab.get(tabId) || 0;
+}
+
+function resetTabState(tabId: number): void {
+  pageGenerationByTab.set(tabId, getPageGeneration(tabId) + 1);
+  mediaByTab.delete(tabId);
+  interceptedMediaByTab.delete(tabId);
+  pageMetadataByTab.delete(tabId);
+  ytdlpFormatUrlByTab.delete(tabId);
+  chrome.action.setBadgeText({ tabId, text: '' }, () => { void chrome.runtime.lastError; });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url !== undefined) {
+    currentPageUrlByTab.set(tabId, changeInfo.url);
+  }
+  if (changeInfo.status === 'loading' || changeInfo.url !== undefined) {
+    navigationGenerationByTab.delete(tabId);
+    resetTabState(tabId);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  currentPageUrlByTab.set(tabId, null);
+  navigationGenerationByTab.delete(tabId);
+  resetTabState(tabId);
+});
 
 // Active downloads: key = downloadKey, value = tracking info
 const activeDownloads = new Map<string, {
@@ -311,6 +344,7 @@ async function getTabTitle(tabId: number): Promise<string> {
 }
 
 async function handleInterceptedMedia(tabId: number, url: string): Promise<void> {
+  const generation = getPageGeneration(tabId);
   const seen = interceptedMediaByTab.get(tabId) || new Set<string>();
   if (seen.has(url)) return;
   seen.add(url);
@@ -318,6 +352,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
 
   const metadata = pageMetadataByTab.get(tabId);
   const title = metadata?.title || await getTabTitle(tabId);
+  if (generation !== getPageGeneration(tabId)) return;
   const type = getMediaType(url);
   const referer = metadata?.pageUrl;
 
@@ -448,6 +483,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
     }
   }
 
+  if (generation !== getPageGeneration(tabId)) return;
   upsertVideo(tabId, {
     id: generateVideoId(url),
     title,
@@ -803,10 +839,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleMessage(message: any, sender: chrome.runtime.MessageSender): Promise<any> {
   switch (message.type) {
     case 'VIDEO_DETECTED':
-      return handleVideoDetected(sender.tab?.id, message.video);
+      return handleVideoDetected(sender.tab?.id, message.video, sender.frameId, sender.url, sender.tab?.url);
 
     case 'PAGE_METADATA':
-      return handlePageMetadata(sender.tab?.id, message.metadata, sender.frameId);
+      return handlePageMetadata(sender.tab?.id, message.metadata, sender.frameId, sender.url, sender.tab?.url);
+
+    case 'PAGE_NAVIGATION':
+      return handlePageNavigation(sender.tab?.id, message.pageUrl, message.generation, sender.frameId, sender.url, sender.tab?.url);
 
     case 'GET_VIDEOS':
       return getVideosForTab(message.tabId);
@@ -829,11 +868,65 @@ async function handleMessage(message: any, sender: chrome.runtime.MessageSender)
   }
 }
 
-function handleVideoDetected(tabId: number | undefined, video: VideoInfo): any {
+function currentTopPageUrl(tabId: number, senderTabUrl?: string): string | undefined {
+  const trackedUrl = currentPageUrlByTab.get(tabId);
+  if (trackedUrl === null) return undefined;
+  if (trackedUrl && senderTabUrl && trackedUrl !== senderTabUrl) return undefined;
+  if (trackedUrl) return trackedUrl;
+  if (senderTabUrl) {
+    currentPageUrlByTab.set(tabId, senderTabUrl);
+    return senderTabUrl;
+  }
+  return undefined;
+}
+
+function isCurrentContentGeneration(tabId: number, generation: unknown, isTopFrame: boolean): boolean {
+  if (typeof generation !== 'number' || !Number.isInteger(generation)) return false;
+
+  const knownGeneration = navigationGenerationByTab.get(tabId);
+  if (knownGeneration === undefined) {
+    if (!isTopFrame) return false;
+    navigationGenerationByTab.set(tabId, generation);
+    return true;
+  }
+
+  return generation === knownGeneration;
+}
+
+function handleVideoDetected(tabId: number | undefined, video: VideoInfo, frameId?: number, frameUrl?: string, senderTabUrl?: string): any {
   if (tabId === undefined) return { error: 'No tabId' };
+  const detectedPageUrl = (video as VideoInfo & { pageUrl?: string; generation?: number }).pageUrl;
+  const generation = (video as VideoInfo & { pageUrl?: string; generation?: number }).generation;
+  const currentUrl = currentTopPageUrl(tabId, senderTabUrl);
+  if (!detectedPageUrl || !frameUrl || detectedPageUrl !== frameUrl || !currentUrl) {
+    return { success: true, stale: true };
+  }
+  if (frameId === 0 && detectedPageUrl !== currentUrl) {
+    return { success: true, stale: true };
+  }
+  if (!isCurrentContentGeneration(tabId, generation, frameId === 0)) {
+    return { success: true, stale: true };
+  }
   upsertVideo(tabId, video);
   console.log(`[MediaGrabber] Detected video on tab ${tabId}:`, video.title);
   return { success: true, count: (mediaByTab.get(tabId) || []).length };
+}
+
+function handlePageNavigation(tabId: number | undefined, pageUrl: string, generation: number, frameId?: number, frameUrl?: string, senderTabUrl?: string): any {
+  if (tabId === undefined) return { error: 'No tabId' };
+  const currentUrl = currentTopPageUrl(tabId, senderTabUrl);
+  if (frameId !== 0 || !pageUrl || !frameUrl || pageUrl !== frameUrl || pageUrl !== senderTabUrl || pageUrl !== currentUrl) {
+    return { success: true, stale: true };
+  }
+
+  const previousGeneration = navigationGenerationByTab.get(tabId);
+  if (typeof generation !== 'number' || !Number.isInteger(generation) || (previousGeneration !== undefined && generation <= previousGeneration)) {
+    return { success: true, stale: true };
+  }
+
+  navigationGenerationByTab.set(tabId, generation);
+  resetTabState(tabId);
+  return { success: true };
 }
 
 function normalizeYtdlpQualities(url: string, qualities: any[]): VideoInfo['qualities'] {
@@ -855,12 +948,12 @@ function normalizeYtdlpQualities(url: string, qualities: any[]): VideoInfo['qual
     }));
 }
 
-async function loadYouTubeFormats(tabId: number, url: string, videoId: string, metadata: PageMetadata): Promise<void> {
+async function loadYouTubeFormats(tabId: number, url: string, videoId: string, metadata: PageMetadata, generation: number): Promise<void> {
   try {
     await ensureCoAppConnected();
     const info = await nativeClient.ytdlpFormats(url);
     const currentMetadata = pageMetadataByTab.get(tabId) || metadata;
-    if (currentMetadata.pageUrl !== url) return;
+    if (generation !== getPageGeneration(tabId) || currentMetadata.pageUrl !== url) return;
 
     const qualities = normalizeYtdlpQualities(url, info.qualities);
     upsertVideo(tabId, {
@@ -875,7 +968,7 @@ async function loadYouTubeFormats(tabId: number, url: string, videoId: string, m
   } catch (error) {
     console.warn('[MediaGrabber] Failed to load yt-dlp formats:', error);
     const currentMetadata = pageMetadataByTab.get(tabId) || metadata;
-    if (currentMetadata.pageUrl !== url) return;
+    if (generation !== getPageGeneration(tabId) || currentMetadata.pageUrl !== url) return;
     upsertVideo(tabId, {
       id: videoId,
       title: currentMetadata.title || 'YouTube Video',
@@ -912,19 +1005,61 @@ function addYouTubeVideo(tabId: number, metadata: PageMetadata): void {
 
   if (ytdlpFormatUrlByTab.get(tabId) === url) return;
   ytdlpFormatUrlByTab.set(tabId, url);
-  void loadYouTubeFormats(tabId, url, videoId, metadata);
+  void loadYouTubeFormats(tabId, url, videoId, metadata, getPageGeneration(tabId));
 }
 
-function handlePageMetadata(tabId: number | undefined, metadata: PageMetadata, frameId?: number): any {
+function handlePageMetadata(tabId: number | undefined, metadata: PageMetadata, frameId?: number, frameUrl?: string, senderTabUrl?: string): any {
   if (tabId === undefined) return { error: 'No tabId' };
 
-  const previous = pageMetadataByTab.get(tabId) || {};
   const isTopFrame = frameId === 0;
+  if (!metadata.pageUrl || !frameUrl || metadata.pageUrl !== frameUrl) {
+    return { success: true, stale: true };
+  }
+
+  if (isTopFrame) {
+    if (!senderTabUrl || metadata.pageUrl !== senderTabUrl) {
+      return { success: true, stale: true };
+    }
+
+    const trackedUrl = currentPageUrlByTab.get(tabId);
+    if (trackedUrl === null) {
+      return { success: true, stale: true };
+    }
+    currentPageUrlByTab.set(tabId, metadata.pageUrl);
+    if (trackedUrl && trackedUrl !== metadata.pageUrl) {
+      navigationGenerationByTab.delete(tabId);
+      resetTabState(tabId);
+    }
+
+    if (typeof metadata.generation !== 'number' || !Number.isInteger(metadata.generation)) {
+      return { success: true, stale: true };
+    }
+    if (!isCurrentContentGeneration(tabId, metadata.generation, true)) {
+      return { success: true, stale: true };
+    }
+  } else if (!currentTopPageUrl(tabId, senderTabUrl)) {
+    return { success: true, stale: true };
+  }
+
+  if (!isTopFrame && !isCurrentContentGeneration(tabId, metadata.generation, false)) {
+    return { success: true, stale: true };
+  }
+
+  let previous = pageMetadataByTab.get(tabId) || {};
+  if (!isTopFrame && !previous.pageUrl) {
+    return { success: true, stale: true };
+  }
+  if (isTopFrame && previous.pageUrl && metadata.pageUrl && previous.pageUrl !== metadata.pageUrl) {
+    resetTabState(tabId);
+    previous = {};
+  }
+
   const merged: PageMetadata = {
     pageUrl: isTopFrame ? (metadata.pageUrl || previous.pageUrl) : previous.pageUrl,
     title: isTopFrame ? (metadata.title || previous.title) : (previous.title || metadata.title),
     thumbnail: isTopFrame ? (metadata.thumbnail || previous.thumbnail) : (previous.thumbnail || metadata.thumbnail),
-    duration: metadata.duration || previous.duration
+    duration: metadata.duration || previous.duration,
+    generation: isTopFrame ? metadata.generation : previous.generation
   };
 
   pageMetadataByTab.set(tabId, merged);
