@@ -33,7 +33,7 @@ Why another downloader? Because the ones that work either haven't been updated i
 ### Quick start
 
 ```bash
-git clone https://github.com/nitroagility/MediaGrabber.git
+git clone https://github.com/miroshArtem/MediaGrabber.git
 cd MediaGrabber
 npm install
 npm run build
@@ -43,9 +43,23 @@ Then head to [Loading the extension](#loading-the-extension) and you're off.
 
 ### Release installation
 
-The production distribution uses GitHub Releases for both the extension and native companion. The installer places CoApp, FFmpeg, ffprobe, and yt-dlp in a user-local MediaGrabber directory and registers native messaging automatically.
+The production distribution uses [GitHub Releases](https://github.com/miroshArtem/MediaGrabber/releases/latest) for both the extension and native companion. The installer places CoApp, FFmpeg, ffprobe, and yt-dlp in a user-local MediaGrabber directory and registers native messaging automatically.
 
-The extension is distributed as a sideload ZIP. Chrome requires Developer mode and **Load unpacked** for this installation path.
+#### Windows x64 installation
+
+1. Open the [latest release](https://github.com/miroshArtem/MediaGrabber/releases/latest).
+2. Download `MediaGrabber-Setup-win-x64.exe` and `MediaGrabber-extension.zip`.
+3. Check the downloaded files against `SHA256SUMS.txt` if you want to verify their integrity.
+4. Run `MediaGrabber-Setup-win-x64.exe`. It installs CoApp, FFmpeg, ffprobe, and yt-dlp and registers the native messaging host for Chrome and Edge.
+5. Extract `MediaGrabber-extension.zip` to a permanent folder. Do not delete or move this folder after loading it in the browser.
+6. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
+7. Enable **Developer mode**.
+8. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
+9. Reload the MediaGrabber extension, open a page with video, and click the MediaGrabber icon.
+
+The extension is distributed as a sideload ZIP and is not published in the Chrome Web Store. Chrome and Edge require Developer mode and **Load unpacked** for this installation path.
+
+If the Settings page shows **CoApp: disconnected**, run the setup executable first, confirm that the extension was loaded from the extracted folder, and reload the extension.
 
 Release maintainer instructions are in [docs/releasing.md](docs/releasing.md).
 
