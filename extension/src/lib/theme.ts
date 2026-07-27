@@ -6,6 +6,14 @@ let mql: MediaQueryList | null = null;
 export function applyTheme(mode: ThemeMode): void {
   const root = document.documentElement;
 
+  const updateTheme = (theme: 'dark' | 'light') => {
+    root.setAttribute('data-theme', theme);
+    const themeColor = theme === 'dark' ? '#0e1015' : '#f7f8fa';
+    document.querySelectorAll('meta[name="theme-color"]').forEach(meta => {
+      meta.setAttribute('content', themeColor);
+    });
+  };
+
   if (mediaListener && mql) {
     mql.removeEventListener('change', mediaListener);
     mediaListener = null;
@@ -15,15 +23,15 @@ export function applyTheme(mode: ThemeMode): void {
   if (mode === 'system') {
     mql = window.matchMedia('(prefers-color-scheme: dark)');
     const update = () => {
-      root.setAttribute('data-theme', mql!.matches ? 'dark' : 'light');
+      updateTheme(mql!.matches ? 'dark' : 'light');
     };
     update();
     mediaListener = (e: MediaQueryListEvent) => {
-      root.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+      updateTheme(e.matches ? 'dark' : 'light');
     };
     mql.addEventListener('change', mediaListener);
   } else {
-    root.setAttribute('data-theme', mode);
+    updateTheme(mode);
   }
 }
 

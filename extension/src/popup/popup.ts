@@ -196,7 +196,7 @@ function renderMediaList(videos: VideoInfo[]): void {
   emptyState.classList.add('hidden');
   videoList.classList.remove('hidden');
   
-  container.innerHTML = '';
+  container.replaceChildren();
   let updatedSelectedVideo: VideoInfo | null = null;
   let updatedSelectedElement: HTMLElement | null = null;
   
@@ -223,46 +223,82 @@ function createMediaItem(video: VideoInfo, index: number): HTMLElement {
   const div = document.createElement('div');
   div.className = 'media-item';
   div.dataset.index = String(index);
+  div.setAttribute('role', 'option');
+  div.setAttribute('aria-selected', 'false');
+  div.tabIndex = 0;
   
   // Calculate duration if available
   const durationStr = video.duration ? formatDuration(video.duration) : '';
-  
-  const iconHtml = video.thumbnail
-    ? `<div class="media-thumbnail-wrapper">
-         <img class="media-thumbnail" alt="${escapeHtml(video.title || 'Video thumbnail')}">
-       </div>
-       <div class="media-icon media-icon-fallback hidden">
-         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-           <polygon points="5 3 19 12 5 21 5 3"></polygon>
-         </svg>
-       </div>`
-    : `<div class="media-icon">
-         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-           <polygon points="5 3 19 12 5 21 5 3"></polygon>
-         </svg>
-       </div>`;
 
-  div.innerHTML = `
-    ${iconHtml}
-    <div class="media-info">
-      <div class="media-type">${getTypeLabel(video.type)}</div>
-      <div class="media-title">${escapeHtml(video.title || 'Unknown Video')}</div>
-      ${durationStr ? `<div class="media-duration">${durationStr}</div>` : ''}
-    </div>
-  `;
+  if (video.thumbnail) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'media-thumbnail-wrapper';
+    const thumbnail = document.createElement('img');
+    thumbnail.className = 'media-thumbnail';
+    thumbnail.alt = video.title || 'Video thumbnail';
+    thumbnail.width = 64;
+    thumbnail.height = 40;
+    thumbnail.src = video.thumbnail;
+    wrapper.appendChild(thumbnail);
+    div.appendChild(wrapper);
 
-  const thumbnail = div.querySelector('.media-thumbnail') as HTMLImageElement | null;
-  if (thumbnail) {
-    thumbnail.src = video.thumbnail || '';
+    const fallback = createMediaIcon('media-icon media-icon-fallback hidden');
+    div.appendChild(fallback);
     thumbnail.addEventListener('error', () => {
-      thumbnail.closest('.media-thumbnail-wrapper')?.classList.add('hidden');
-      div.querySelector('.media-icon-fallback')?.classList.remove('hidden');
+      wrapper.classList.add('hidden');
+      fallback.classList.remove('hidden');
     });
+  } else {
+    div.appendChild(createMediaIcon('media-icon'));
   }
+
+  const info = document.createElement('div');
+  info.className = 'media-info';
+
+  const type = document.createElement('div');
+  type.className = 'media-type';
+  type.textContent = getTypeLabel(video.type);
+  info.appendChild(type);
+
+  const title = document.createElement('div');
+  title.className = 'media-title';
+  title.textContent = video.title || 'Unknown Video';
+  info.appendChild(title);
+
+  if (durationStr) {
+    const duration = document.createElement('div');
+    duration.className = 'media-duration';
+    duration.textContent = durationStr;
+    info.appendChild(duration);
+  }
+
+  div.appendChild(info);
   
   div.addEventListener('click', () => selectMedia(video, div));
+  div.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      selectMedia(video, div);
+    }
+  });
   
   return div;
+}
+
+function createMediaIcon(className: string): HTMLElement {
+  const icon = document.createElement('div');
+  icon.className = className;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '20');
+  svg.setAttribute('height', '20');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+  const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  polygon.setAttribute('points', '5 3 19 12 5 21 5 3');
+  svg.appendChild(polygon);
+  icon.appendChild(svg);
+  return icon;
 }
 
 /**
@@ -272,10 +308,12 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
   // Remove previous selection
   document.querySelectorAll('.media-item').forEach(el => {
     el.classList.remove('selected');
+    el.setAttribute('aria-selected', 'false');
   });
   
   // Select this one
   element.classList.add('selected');
+  element.setAttribute('aria-selected', 'true');
   
   selectedVideo = video;
   
@@ -333,10 +371,13 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
 function renderQualityList(): void {
   const container = document.getElementById('quality-list')!;
   const downloadBtn = document.getElementById('download-btn') as HTMLButtonElement | null;
-  container.innerHTML = '';
+  container.replaceChildren();
   
   if (currentQualities.length === 0) {
-    container.innerHTML = '<p class="no-quality">Loading YouTube qualities…</p>';
+    const loading = document.createElement('p');
+    loading.className = 'no-quality';
+    loading.textContent = 'Loading YouTube qualities…';
+    container.appendChild(loading);
     if (downloadBtn) downloadBtn.disabled = true;
     return;
   }
@@ -345,10 +386,15 @@ function renderQualityList(): void {
   // Quick options
   const quickOptions = document.createElement('div');
   quickOptions.className = 'quick-options';
-  quickOptions.innerHTML = `
-    <button class="quick-btn" data-quality="best">Best</button>
-    <button class="quick-btn" data-quality="worst">Lowest</button>
-  `;
+  const bestButton = document.createElement('button');
+  bestButton.className = 'quick-btn';
+  bestButton.dataset.quality = 'best';
+  bestButton.textContent = 'Best';
+  const lowestButton = document.createElement('button');
+  lowestButton.className = 'quick-btn';
+  lowestButton.dataset.quality = 'worst';
+  lowestButton.textContent = 'Lowest';
+  quickOptions.append(bestButton, lowestButton);
   container.appendChild(quickOptions);
   
   quickOptions.querySelectorAll('.quick-btn').forEach(btn => {
@@ -366,33 +412,92 @@ function renderQualityList(): void {
   });
   
   // Individual quality options
+  const qualityOptions = document.createElement('div');
+  qualityOptions.className = 'quality-options';
+  qualityOptions.setAttribute('role', 'radiogroup');
+  qualityOptions.setAttribute('aria-label', 'Quality options');
+  container.appendChild(qualityOptions);
+
   currentQualities.forEach((q, index) => {
     const option = document.createElement('label');
     option.className = 'quality-option';
     option.dataset.index = String(index);
     
-    option.innerHTML = `
-      <input type="radio" name="quality" value="${index}" class="quality-radio">
-      <span class="quality-label">${q.label}</span>
-      ${q.kind === 'audio' ? '<span class="quality-kind">Audio</span>' : ''}
-      ${q.kind === 'subtitle' ? '<span class="quality-kind quality-kind-sub">SUB</span>' : ''}
-      ${q.resolution ? `<span class="quality-bandwidth">${q.resolution}</span>` : ''}
-      <span class="quality-bandwidth">${q.bandwidthLabel}</span>
-      ${q.sizeLabel ? `<span class="quality-size">${q.sizeLabel}</span>` : ''}
-    `;
-    
-    const radio = option.querySelector('input[type="radio"]') as HTMLInputElement;
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'quality';
+    radio.value = String(index);
+    radio.className = 'quality-radio';
+    radio.tabIndex = index === 0 ? 0 : -1;
+    radio.setAttribute('aria-checked', 'false');
+    option.appendChild(radio);
+
+    const qualityLabel = document.createElement('span');
+    qualityLabel.className = 'quality-label';
+    qualityLabel.textContent = q.label;
+    option.appendChild(qualityLabel);
+
+    if (q.kind === 'audio' || q.kind === 'subtitle') {
+      const kind = document.createElement('span');
+      kind.className = q.kind === 'subtitle' ? 'quality-kind quality-kind-sub' : 'quality-kind';
+      kind.textContent = q.kind === 'subtitle' ? 'SUB' : 'Audio';
+      option.appendChild(kind);
+    }
+
+    if (q.resolution) {
+      const resolution = document.createElement('span');
+      resolution.className = 'quality-bandwidth';
+      resolution.textContent = q.resolution;
+      option.appendChild(resolution);
+    }
+
+    const bandwidth = document.createElement('span');
+    bandwidth.className = 'quality-bandwidth';
+    bandwidth.textContent = q.bandwidthLabel;
+    option.appendChild(bandwidth);
+
+    if (q.sizeLabel) {
+      const size = document.createElement('span');
+      size.className = 'quality-size';
+      size.textContent = q.sizeLabel;
+      option.appendChild(size);
+    }
+
     radio.addEventListener('change', () => {
       if (radio.checked) {
         selectQuality(index);
       }
+    });
+
+    radio.addEventListener('keydown', (event) => {
+      let nextIndex = index;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+        nextIndex = (index + 1) % currentQualities.length;
+      } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+        nextIndex = (index - 1 + currentQualities.length) % currentQualities.length;
+      } else if (event.key === 'Home') {
+        nextIndex = 0;
+      } else if (event.key === 'End') {
+        nextIndex = currentQualities.length - 1;
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectQuality(index);
+        return;
+      } else {
+        return;
+      }
+
+      event.preventDefault();
+      selectQuality(nextIndex);
+      const nextRadio = qualityOptions.querySelectorAll<HTMLInputElement>('.quality-radio')[nextIndex];
+      nextRadio?.focus();
     });
     
     option.addEventListener('click', () => {
       selectQuality(index);
     });
     
-    container.appendChild(option);
+    qualityOptions.appendChild(option);
   });
   
   // Select quality based on defaultQuality setting
@@ -409,13 +514,18 @@ function renderQualityList(): void {
  * Select a quality option
  */
 function selectQuality(index: number): void {
+  if (index < 0 || index >= currentQualities.length) return;
   selectedQualityIndex = index;
   
   // Update visual selection
   document.querySelectorAll('.quality-option').forEach((el, i) => {
     el.classList.toggle('selected', i === index);
     const radio = el.querySelector('input[type="radio"]') as HTMLInputElement;
-    if (radio) radio.checked = i === index;
+    if (radio) {
+      radio.checked = i === index;
+      radio.tabIndex = i === index ? 0 : -1;
+      radio.setAttribute('aria-checked', String(i === index));
+    }
   });
   
   // Update filename with selected quality
@@ -476,6 +586,8 @@ function showDownloadingUI(): void {
   downloadSection.classList.add('hidden');
   error.classList.add('hidden');
   downloadProgress.classList.remove('hidden');
+  updateStatus('Downloading…', 'info');
+  document.getElementById('cancel-btn')?.focus();
   
   // Reset progress
   updateProgressUI({ percent: 0, speed: 0 });
@@ -505,6 +617,7 @@ function restoreDownloadUI(downloadId: string, filename: string, progress: any):
 
   updateProgressUI(progress || { percent: 0 });
   updateStatus('Downloading…', 'info');
+  document.getElementById('cancel-btn')?.focus();
 }
 
 function showDownloadStarted(downloadId: string): void {
@@ -521,21 +634,28 @@ function updateProgressUI(progress: any): void {
   if (speedEl) speedEl.textContent = '';
   if (etaEl) etaEl.textContent = '';
 
-  const percent = typeof progress.percent === 'number' ? progress.percent : 0;
+  const percent = typeof progress.percent === 'number' && Number.isFinite(progress.percent)
+    ? progress.percent
+    : 0;
+  const measuredPercent = Math.min(100, Math.max(0, percent));
   const hasMeasuredProgress = percent > 0;
 
   if (fill) {
     if (hasMeasuredProgress) {
       fill.classList.remove('indeterminate');
-      fill.style.width = `${Math.min(100, percent)}%`;
+      fill.style.width = `${measuredPercent}%`;
+      fill.setAttribute('aria-valuenow', String(measuredPercent));
+      fill.setAttribute('aria-valuetext', `${Math.round(measuredPercent)}%`);
     } else {
       fill.classList.add('indeterminate');
       fill.style.width = '35%';
+      fill.removeAttribute('aria-valuenow');
+      fill.setAttribute('aria-valuetext', 'Downloading…');
     }
   }
 
   if (percentEl) {
-    percentEl.textContent = hasMeasuredProgress ? `${Math.round(percent)}%` : '...';
+    percentEl.textContent = hasMeasuredProgress ? `${Math.round(measuredPercent)}%` : '…';
   }
 
   // Handle FFmpeg speed (string like "1.5x") vs direct download (bytes)
@@ -569,13 +689,14 @@ function showDownloadComplete(): void {
   const downloadProgress = document.getElementById('download-progress')!;
   const fill = document.getElementById('progress-fill');
   
-  if (fill) fill.style.width = '100%';
+  updateProgressUI({ percent: 100 });
   if (fill) fill.style.background = 'var(--success)';
   
   // Auto close after 2 seconds
   setTimeout(() => {
     resetUI();
     requestMediaList();
+    document.getElementById('settings-btn')?.focus();
   }, 2000);
 }
 
@@ -610,6 +731,9 @@ function resetUI(): void {
     fill.style.width = '0%';
     fill.style.background = 'var(--accent)';
   }
+
+  const selectedElement = document.querySelector('.media-item.selected') as HTMLElement | null;
+  (selectedElement || document.getElementById('settings-btn'))?.focus();
 }
 
 function showError(message: string): void {
@@ -624,6 +748,7 @@ function showError(message: string): void {
   downloadProgress.classList.add('hidden');
   
   updateStatus('Error', 'error');
+  document.getElementById('error-dismiss')?.focus();
 }
 
 function hideError(): void {
@@ -732,10 +857,4 @@ function findLowestVideoQualityIndex(): number {
     if ((currentQualities[i].height || 0) > 0) return i;
   }
   return -1;
-}
-
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }

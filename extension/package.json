@@ -4,7 +4,7 @@
   "description": "Browser extension for downloading online videos with quality selection",
   "main": "dist/background.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run bundle",
     "bundle": "esbuild src/background.ts --bundle --outfile=dist/background.js --platform=browser & esbuild src/content.ts --bundle --outfile=dist/content.js --platform=browser & esbuild src/mse-inject.ts --bundle --outfile=dist/mse-inject.js --platform=browser --format=iife & esbuild src/popup/popup.ts --bundle --outfile=dist/popup.js --platform=browser & esbuild src/popup/settings.ts --bundle --outfile=dist/settings.js --platform=browser",
     "clean": "powershell Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue",
     "package": "cd dist & powershell Compress-Archive -Path * -DestinationPath ../MediaGrabber.zip -Force"

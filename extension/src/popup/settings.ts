@@ -33,7 +33,8 @@ function setupThemeSelector(): void {
 
   updateThemeButtons(selectedTheme);
 
-  selector.querySelectorAll('.theme-option').forEach(btn => {
+  const buttons = Array.from(selector.querySelectorAll<HTMLButtonElement>('.theme-option'));
+  buttons.forEach(btn => {
     btn.addEventListener('click', () => {
       const theme = (btn as HTMLElement).dataset.theme as ThemeMode;
       if (!theme) return;
@@ -41,21 +42,40 @@ function setupThemeSelector(): void {
       applyTheme(theme);
       updateThemeButtons(theme);
     });
+
+    btn.addEventListener('keydown', event => {
+      const currentIndex = buttons.indexOf(btn);
+      let nextIndex = currentIndex;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+      } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        nextIndex = (currentIndex + 1) % buttons.length;
+      } else if (event.key === 'Home') {
+        nextIndex = 0;
+      } else if (event.key === 'End') {
+        nextIndex = buttons.length - 1;
+      } else {
+        return;
+      }
+
+      event.preventDefault();
+      buttons[nextIndex].click();
+      buttons[nextIndex].focus();
+    });
   });
 }
 
 function updateThemeButtons(theme: ThemeMode): void {
   document.querySelectorAll('.theme-option').forEach(btn => {
     const el = btn as HTMLElement;
-    el.classList.toggle('active', el.dataset.theme === theme);
+    const isSelected = el.dataset.theme === theme;
+    el.classList.toggle('active', isSelected);
+    el.setAttribute('aria-checked', String(isSelected));
+    el.tabIndex = isSelected ? 0 : -1;
   });
 }
 
 function setupEventListeners(): void {
-  document.getElementById('close-btn')?.addEventListener('click', () => {
-    window.location.href = 'popup.html';
-  });
-
   document.getElementById('save-btn')?.addEventListener('click', async () => {
     await saveCurrentSettings();
   });
@@ -66,6 +86,9 @@ function setupEventListeners(): void {
 }
 
 async function saveCurrentSettings(): Promise<void> {
+  const saveButton = document.getElementById('save-btn') as HTMLButtonElement | null;
+  if (!saveButton || saveButton.disabled) return;
+
   const defaultQuality = document.getElementById('default-quality') as HTMLSelectElement;
   const showNotifications = document.getElementById('show-notifications') as HTMLInputElement;
 
@@ -75,12 +98,20 @@ async function saveCurrentSettings(): Promise<void> {
     theme: selectedTheme
   };
 
+  saveButton.disabled = true;
+  saveButton.setAttribute('aria-busy', 'true');
+  saveButton.textContent = 'Saving\u2026';
+
   try {
     await saveSettings(settings);
     currentSettings = settings;
     showNotification('Settings saved');
   } catch (error) {
     showNotification('Failed to save settings', 'error');
+  } finally {
+    saveButton.disabled = false;
+    saveButton.removeAttribute('aria-busy');
+    saveButton.textContent = 'Save Settings';
   }
 }
 

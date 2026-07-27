@@ -14,10 +14,10 @@
   --border-soft:   #1e2129;
   --text:          #e9ebf1;
   --text-muted:    #8b919e;
-  --text-dim:      #5a606e;
-  --accent:        #7c5cff;
+  --text-dim:      #7f8796;
+  --accent:        #7958f5;
   --accent-hover:  #6a47ff;
-  --accent-soft:   rgba(124, 92, 255, 0.14);
+  --accent-soft:   rgba(121, 88, 245, 0.14);
   --accent-text:   #b8a6ff;
   --success:       #34d399;
   --success-soft:  rgba(52, 211, 153, 0.12);
@@ -39,14 +39,14 @@
   --border-soft:   #eef0f4;
   --text:          #1a1d24;
   --text-muted:    #6b7180;
-  --text-dim:      #9da3af;
+  --text-dim:      #687080;
   --accent:        #5b3df5;
   --accent-hover:  #4c2ee8;
   --accent-soft:   rgba(91, 61, 245, 0.08);
-  --accent-text:   #7c5cff;
-  --success:       #10b981;
+  --accent-text:   #4c2ee8;
+  --success:       #047857;
   --success-soft:  rgba(16, 185, 129, 0.08);
-  --error:         #ef4444;
+  --error:         #b91c1c;
   --error-soft:    rgba(239, 68, 68, 0.06);
   --radius:        10px;
   --radius-sm:     6px;
@@ -60,10 +60,20 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+}
+
 body {
   font-family: system-ui, -apple-system, 'Segoe UI Variable', 'Segoe UI', sans-serif;
   width: 360px;
+  height: auto;
   min-height: 420px;
+  max-height: 600px;
   font-size: 14px;
   color: var(--text);
   background: var(--bg);
@@ -71,6 +81,8 @@ body {
   transition: background-color 0.2s, color 0.2s;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 ::selection {
@@ -128,8 +140,11 @@ body {
 /* ═══ Content ═══ */
 .settings-content {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   padding: 16px;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
@@ -209,11 +224,13 @@ body {
   color: var(--text-dim);
   margin-top: 5px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 /* ═══ Theme Selector (Segmented Control) ═══ */
 .theme-segmented {
   display: flex;
+  flex-wrap: wrap;
   gap: 0;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -223,6 +240,7 @@ body {
 
 .theme-option {
   flex: 1;
+  min-width: 0;
   padding: 7px 8px;
   border: none;
   background: none;
@@ -291,6 +309,7 @@ body {
 /* ═══ Status Display ═══ */
 .status-display {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
@@ -326,11 +345,14 @@ body {
   font-size: 11px;
   color: var(--text-dim);
   font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ═══ Footer ═══ */
 .settings-footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
@@ -340,6 +362,7 @@ body {
 
 /* ═══ Buttons ═══ */
 .btn {
+  min-width: 0;
   padding: 9px 18px;
   border: none;
   border-radius: var(--radius-sm);

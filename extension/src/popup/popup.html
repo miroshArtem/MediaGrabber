@@ -47,7 +47,7 @@
     
     <!-- Media List -->
     <div id="video-list" class="media-list hidden">
-      <div id="videos"></div>
+      <div id="videos" role="listbox" aria-label="Detected media"></div>
     </div>
     
     <!-- Selected Media Details -->
@@ -69,13 +69,13 @@
     </div>
     
     <!-- Download Progress -->
-    <div id="download-progress" class="download-progress hidden" role="status" aria-live="polite">
+    <div id="download-progress" class="download-progress hidden">
       <div class="progress-header">
         <span id="progress-filename">downloading…</span>
         <span id="progress-percent">0%</span>
       </div>
       <div class="progress-bar">
-        <div id="progress-fill"></div>
+        <div id="progress-fill" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Downloading…"></div>
       </div>
       <div class="progress-info">
         <span id="progress-speed"></span>
