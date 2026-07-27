@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import rpc from './rpc';
+import { getRuntimeBinary, getRuntimeRoots } from './paths';
 
 const ytdlpChildren = new Map<number, ChildProcess>();
 const to_kill = new Set<ChildProcess>();
@@ -17,14 +18,12 @@ function spawn(arg0: string, argv: string[]): ChildProcess {
 }
 
 function findYtDlp(): string {
-  const platform = process.platform;
-  const exe = platform === 'win32' ? '.exe' : '';
   const paths: string[] = [
-    path.join(__dirname, '..', 'ytdlp', platform === 'win32' ? 'win' : platform, 'yt-dlp' + exe),
-    path.join(process.cwd(), 'ytdlp', 'yt-dlp' + exe)
+    ...getRuntimeRoots().map(root => path.join(root, getRuntimeBinary('ytdlp'))),
+    path.join(process.cwd(), 'ytdlp', 'yt-dlp' + (process.platform === 'win32' ? '.exe' : ''))
   ];
 
-  if (platform === 'win32') {
+  if (process.platform === 'win32') {
     const roots = [
       path.join(os.homedir(), 'AppData', 'Roaming', 'Python'),
       path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python')
@@ -46,10 +45,11 @@ function findYtDlp(): string {
 function findFFmpegDir(): string {
   const platform = process.platform;
   const exe = platform === 'win32' ? '.exe' : '';
-  const dir1 = path.join(__dirname, '..', 'ffmpeg', platform === 'win32' ? 'win' : platform);
-  const dir2 = path.join(process.cwd(), 'ffmpeg');
-  if (fs.existsSync(path.join(dir1, 'ffmpeg' + exe))) return dir1;
-  if (fs.existsSync(path.join(dir2, 'ffmpeg' + exe))) return dir2;
+  const dirNames = getRuntimeRoots().map(root => path.join(root, 'ffmpeg', platform === 'win32' ? 'win' : platform));
+  dirNames.push(path.join(process.cwd(), 'ffmpeg'));
+  for (const dir of dirNames) {
+    if (fs.existsSync(path.join(dir, 'ffmpeg' + exe))) return dir;
+  }
   return '';
 }
 

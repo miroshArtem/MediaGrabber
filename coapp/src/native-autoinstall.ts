@@ -4,6 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import { getHostBinaryPath, getInstallDir } from './paths';
 
 const MANIFEST_NAME = 'com.mediagrabber.coapp.json';
 
@@ -14,25 +15,9 @@ export interface ManifestContent {
   type: string;
   allowed_origins: string[];
 }
-
-function getInstallDir(): string {
-  if (process.platform === 'win32') {
-    return 'C:\\Program Files\\MediaGrabber';
-  } else if (process.platform === 'darwin') {
-    return '/Applications/MediaGrabber';
-  } else {
-    return path.join(require('os').homedir(), '.mediagrabber');
-  }
-}
-
-function getCoAppBinaryName(): string {
-  return process.platform === 'win32' ? 'coapp.exe' : 'coapp';
-}
-
 function getManifestPath(): string {
   return path.join(getInstallDir(), MANIFEST_NAME);
 }
-
 function getChromeRegistryKeyPath(): string {
   if (process.platform === 'win32') {
     return 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.mediagrabber.coapp';
@@ -56,7 +41,7 @@ function getManifestContent(extensionIds?: string[]): ManifestContent {
   return {
     name: 'com.mediagrabber.coapp',
     description: 'MediaGrabber companion application',
-    path: path.join(getInstallDir(), getCoAppBinaryName()),
+    path: getHostBinaryPath(),
     type: 'stdio',
     allowed_origins: extensionIds?.length ? extensionIds.map(id => `chrome-extension://${id}/`) : defaultOrigins
   };
@@ -154,95 +139,63 @@ async function unregisterWindows(): Promise<void> {
 
 // macOS registration
 async function registerMac(manifestPath: string): Promise<void> {
-  const destDir = path.join(
-    require('os').homedir(),
-    'Library', 'Application Support',
-    'Google', 'Chrome', 'NativeMessagingHosts'
-  );
-  
-  await fs.promises.mkdir(destDir, { recursive: true });
-  await fs.promises.copyFile(
-    manifestPath,
-    path.join(destDir, MANIFEST_NAME)
-  );
-  
-  console.error(`[MediaGrabber] Manifest copied to: ${destDir}`);
+  const home = require('os').homedir();
+  const destinations = [
+    path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts'),
+    path.join(home, 'Library', 'Application Support', 'Microsoft Edge', 'NativeMessagingHosts')
+  ];
+
+  for (const destDir of destinations) {
+    await fs.promises.mkdir(destDir, { recursive: true });
+    await fs.promises.copyFile(manifestPath, path.join(destDir, MANIFEST_NAME));
+    console.error(`[MediaGrabber] Manifest copied to: ${destDir}`);
+  }
 }
 
 async function unregisterMac(): Promise<void> {
-  const manifestPath = path.join(
-    require('os').homedir(),
-    'Library', 'Application Support',
-    'Google', 'Chrome', 'NativeMessagingHosts',
-    MANIFEST_NAME
-  );
-  
-  try {
-    await fs.promises.unlink(manifestPath);
-    console.error(`[MediaGrabber] Manifest removed from macOS`);
-  } catch {
-    // File may not exist
+  const home = require('os').homedir();
+  const destinations = [
+    path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts'),
+    path.join(home, 'Library', 'Application Support', 'Microsoft Edge', 'NativeMessagingHosts')
+  ];
+
+  for (const destDir of destinations) {
+    try {
+      await fs.promises.unlink(path.join(destDir, MANIFEST_NAME));
+      console.error(`[MediaGrabber] Manifest removed from: ${destDir}`);
+    } catch {
+      // File may not exist
+    }
   }
 }
-
 // Linux registration
 async function registerLinux(manifestPath: string): Promise<void> {
-  const destDir = path.join(
-    require('os').homedir(),
-    '.config', 'google-chrome', 'NativeMessagingHosts'
-  );
-  
-  await fs.promises.mkdir(destDir, { recursive: true });
-  await fs.promises.copyFile(
-    manifestPath,
-    path.join(destDir, MANIFEST_NAME)
-  );
-  
-  console.error(`[MediaGrabber] Manifest copied to: ${destDir}`);
+  const home = require('os').homedir();
+  const destinations = [
+    path.join(home, '.config', 'google-chrome', 'NativeMessagingHosts'),
+    path.join(home, '.config', 'microsoft-edge', 'NativeMessagingHosts')
+  ];
+
+  for (const destDir of destinations) {
+    await fs.promises.mkdir(destDir, { recursive: true });
+    await fs.promises.copyFile(manifestPath, path.join(destDir, MANIFEST_NAME));
+    console.error(`[MediaGrabber] Manifest copied to: ${destDir}`);
+  }
 }
 
 async function unregisterLinux(): Promise<void> {
-  const manifestPath = path.join(
-    require('os').homedir(),
-    '.config', 'google-chrome', 'NativeMessagingHosts',
-    MANIFEST_NAME
-  );
-  
-  try {
-    await fs.promises.unlink(manifestPath);
-    console.error(`[MediaGrabber] Manifest removed from Linux`);
-  } catch {
-    // File may not exist
-  }
-}
+  const home = require('os').homedir();
+  const destinations = [
+    path.join(home, '.config', 'google-chrome', 'NativeMessagingHosts'),
+    path.join(home, '.config', 'microsoft-edge', 'NativeMessagingHosts')
+  ];
 
-// CLI for registration
-if (require.main === module) {
-  const args = process.argv.slice(2);
-  
-  if (args[0] === 'register') {
-    const extensionIds = args.slice(1);
-    registerManifest(extensionIds)
-      .then(() => {
-        console.error('[MediaGrabber] Registration complete');
-        process.exit(0);
-      })
-      .catch((e) => {
-        console.error('[MediaGrabber] Registration failed:', e);
-        process.exit(1);
-      });
-  } else if (args[0] === 'unregister') {
-    unregisterManifest()
-      .then(() => {
-        console.error('[MediaGrabber] Unregistration complete');
-        process.exit(0);
-      })
-      .catch((e) => {
-        console.error('[MediaGrabber] Unregistration failed:', e);
-        process.exit(1);
-      });
-  } else {
-    console.log('Usage: coapp register [extension-id...] | unregister');
-    process.exit(1);
+  for (const destDir of destinations) {
+    try {
+      await fs.promises.unlink(path.join(destDir, MANIFEST_NAME));
+      console.error(`[MediaGrabber] Manifest removed from: ${destDir}`);
+    } catch {
+      // File may not exist
+    }
   }
 }

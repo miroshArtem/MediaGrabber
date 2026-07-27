@@ -22,7 +22,7 @@ vdhcoapp/
 │       ├── file.js             # File system operations
 │       ├── weh-rpc.js          # RPC protocol implementation
 │       ├── request.js          # HTTP request utilities
-│       ├── native-autoinstall.js  # Browser registration
+│       ├── native-autoinstall.ts  # Browser registration
 │       ├── vm.js               # Sandboxed JavaScript VM
 │       └── logger.js          # Logging utilities
 ├── config.toml                 # Platform-specific configuration
@@ -163,9 +163,9 @@ function findExecutableFullPath(programName, extraPath = "") {
 
 ### HTTP Download Implementation
 
-Uses the `got` library for HTTP streaming:
+Uses Node's built-in HTTP/HTTPS streams for HTTP streaming:
 ```javascript
-let downloadItem = got.stream(options.url, dlOptions);
+let downloadItem = requestStream(options.url, dlOptions);
 downloadItem.pipe(fs.createWriteStream(filename));
 ```
 
@@ -174,7 +174,7 @@ downloadItem.pipe(fs.createWriteStream(filename));
 ```javascript
 const downloads = {
   <downloadId>: {
-    downloadItem,        // The got stream
+    downloadItem,        // The response stream
     totalBytes,         // Content-Length header
     bytesReceived,      // Progress counter
     url,                // Source URL
@@ -381,7 +381,7 @@ HKLM\Software\Microsoft\Edge\NativeMessagingHosts\net.downloadhelper.coapp
 
 ### Auto-Registration
 
-The `native-autoinstall.js` module handles browser-specific registration:
+The `native-autoinstall.ts` module handles browser-specific registration:
 - Detects browser type (Firefox/Chrome/Edge)
 - Places manifest in correct location
 - Requires browser restart or extension reload

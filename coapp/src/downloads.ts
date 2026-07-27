@@ -2,20 +2,47 @@
 // Registers: downloads.download, downloads.search, downloads.cancel
 
 import * as fs from 'fs';
+import * as http from 'http';
+import * as https from 'https';
 import * as path from 'path';
 import * as os from 'os';
+import { PassThrough } from 'stream';
 import rpc from './rpc';
 
-// got 12+ is ESM-only; lazy-load via native dynamic import so this CJS
-// module can use it. The Function wrapper prevents TypeScript from
-// rewriting import() into require() (which would throw ERR_REQUIRE_ESM).
-const nativeImport = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<any>;
-let _got: any;
-async function getGot(): Promise<any> {
-  if (!_got) {
-    _got = (await nativeImport('got')).default;
+function requestStream(url: string, options: any, redirects = 0): PassThrough {
+  const output = new PassThrough();
+  if (redirects > 5) {
+    process.nextTick(() => output.emit('error', new Error('Too many download redirects')));
+    return output;
   }
-  return _got;
+
+  const client = url.startsWith('https:') ? https : http;
+  const request = client.get(url, {
+    headers: options.headers,
+    rejectUnauthorized: options.rejectUnauthorized !== false
+  }, response => {
+    const location = response.headers.location;
+    if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && location) {
+      response.resume();
+      const redirected = requestStream(new URL(location, url).toString(), options, redirects + 1);
+      redirected.on('response', redirectedResponse => output.emit('response', redirectedResponse));
+      redirected.on('error', error => output.emit('error', error));
+      redirected.pipe(output);
+      return;
+    }
+
+    if (!response.statusCode || response.statusCode >= 400) {
+      response.resume();
+      output.emit('error', new Error(`Download failed with HTTP ${response.statusCode || 'unknown'}`));
+      return;
+    }
+
+    output.emit('response', response);
+    response.on('error', error => output.emit('error', error));
+    response.pipe(output);
+  });
+  request.on('error', error => output.emit('error', error));
+  return output;
 }
 
 const defaultDownloadFolder = path.join(os.homedir(), 'Downloads');
@@ -29,8 +56,6 @@ function cleanupEntry(downloadId: number): void {
 
 rpc.listen({
   'downloads.download': async (options: any = {}) => {
-    const got = await getGot();
-
     const filename = path.join(
       options.directory || defaultDownloadFolder,
       options.filename || 'download'
@@ -42,7 +67,7 @@ rpc.listen({
     }
 
     const dlOptions: any = {
-      rejectUnauthorized: !!options.rejectUnauthorized,
+      rejectUnauthorized: options.rejectUnauthorized !== false,
       headers: {}
     };
     (options.headers || []).forEach((header: any) => {
@@ -50,7 +75,7 @@ rpc.listen({
     });
 
     const downloadId = ++currentDownloadId;
-    const stream = got.stream(options.url, dlOptions);
+    const stream = requestStream(options.url, dlOptions);
 
     downloads[downloadId] = {
       stream,

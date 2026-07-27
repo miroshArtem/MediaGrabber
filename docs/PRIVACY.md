@@ -45,7 +45,7 @@ We may update this policy from time to time. We will notify users of any changes
 
 ## Contact
 
-For questions about this privacy policy, please contact us via the Chrome Web Store developer contact form.
+For questions about this privacy policy, please open an issue in the [MediaGrabber GitHub repository](https://github.com/nitroagility/MediaGrabber/issues).
 
 ---
 

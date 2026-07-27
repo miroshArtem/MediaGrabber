@@ -37,12 +37,19 @@ git clone https://github.com/nitroagility/MediaGrabber.git
 cd MediaGrabber
 npm install
 npm run build
-cd extension && npm run bundle
 ```
 
 Then head to [Loading the extension](#loading-the-extension) and you're off.
 
-### What you'll need
+### Release installation
+
+The production distribution uses GitHub Releases for both the extension and native companion. The installer places CoApp, FFmpeg, ffprobe, and yt-dlp in a user-local MediaGrabber directory and registers native messaging automatically.
+
+The extension is distributed as a sideload ZIP. Chrome requires Developer mode and **Load unpacked** for this installation path.
+
+Release maintainer instructions are in [docs/releasing.md](docs/releasing.md).
+
+### What you'll need for source builds
 
 Here's everything you need to install before MediaGrabber will work. If you've never done this kind of thing before — don't worry, each one has a direct link and a plain-English explanation.
 
@@ -54,7 +61,7 @@ Here's everything you need to install before MediaGrabber will work. If you've n
 | 4 | **yt-dlp** | Downloads YouTube videos at full quality. | Two ways to get it — see [Installing yt-dlp](#installing-yt-dlp) below. Pick one. |
 | 5 | **Python 3.8+** | Only needed if you install yt-dlp via pip (Option B). Not needed if you download the standalone yt-dlp binary. | [python.org/downloads](https://www.python.org/downloads) — run the installer, **check the box that says "Add Python to PATH"** before clicking Install. |
 
-> Node.js and Python are one-time installs — you install them, they stay on your system, and you never think about them again. FFmpeg and yt-dlp are the only things you place inside the project folder.
+> Node.js and Python are required for source builds. Release users do not need Node.js, Python, FFmpeg, or yt-dlp installed separately.
 
 #### Installing FFmpeg
 
@@ -112,11 +119,10 @@ This is an npm monorepo — one `npm install` grabs everything for both packages
 ```bash
 # From the project root
 npm install        # installs deps for extension + CoApp
-npm run build      # compiles TypeScript for both
-cd extension && npm run bundle   # ⚠️ DON'T SKIP THIS — esbuild bundle for the browser
+npm run build      # compiles TypeScript and bundles the extension
 ```
 
-That last step trips people up. The TypeScript compiler spits out ES modules, but Chrome's service worker can't resolve bare imports like `import { foo } from './lib/bar'`. esbuild bundles everything into self-contained files the browser actually understands. Miss this step and the extension will fail silently with an opaque import error.
+The extension build runs esbuild automatically. TypeScript emits intermediate ES modules, while esbuild creates the self-contained files used by Chrome.
 
 ### Loading the extension
 
@@ -139,21 +145,21 @@ Now register the native messaging host so Chrome knows how to talk to it:
 **Windows:**
 ```bash
 cd coapp
-node dist/native-autoinstall.js register abcdef123456...   # your extension ID
+node dist/native-autoinstall-cli.js register abcdef123456...   # your extension ID
 ```
 This writes the necessary registry keys for both Chrome and Edge.
 
 **macOS:**
 ```bash
 cd coapp
-node dist/native-autoinstall.js register abcdef123456...
+node dist/native-autoinstall-cli.js register abcdef123456...
 ```
 Copies the manifest to `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`.
 
 **Linux:**
 ```bash
 cd coapp
-node dist/native-autoinstall.js register abcdef123456...
+node dist/native-autoinstall-cli.js register abcdef123456...
 ```
 Copies the manifest to `~/.config/google-chrome/NativeMessagingHosts/`.
 
@@ -184,7 +190,7 @@ The companion app handles the heavy lifting: FFmpeg for HLS/DASH conversion, yt-
 **"CoApp: disconnected" in Settings**
 
 The most common issue. Check that:
-- You ran the `native-autoinstall.js register` command with the correct extension ID
+- You ran the `native-autoinstall-cli.js register` command with the correct extension ID
 - You reloaded the extension after registering
 - FFmpeg is in one of the expected locations (see [Setting up the native companion](#setting-up-the-native-companion))
 
@@ -208,14 +214,13 @@ Probably FFmpeg missing. The conversion step needs FFmpeg to mux HLS/DASH segmen
 
 ### Development
 
-There are no tests, linter, or CI yet. The build verification is: does `tsc` succeed?
+There are no tests or linter yet. CI now builds the Windows release on `v*` tags; local verification is a successful full build.
 
 ```bash
-npm run build             # tsc for both packages
-cd extension && npm run bundle  # esbuild — ALWAYS after build
+npm run build             # tsc + esbuild for extension, tsc for CoApp
 ```
 
-> `npm run dev:extension` is broken — the extension package has no watch script. Just re-run build + bundle after changes.
+> `npm run dev:extension` is broken — the extension package has no watch script. Re-run `npm run build` after changes.
 
 For the CoApp:
 ```bash
@@ -233,7 +238,7 @@ The extension's source lives in `extension/src/`. The main files:
 
 ### Contributing
 
-This is a side project I'm actively hacking on. If you run into a site where detection doesn't work, open an issue with the URL — that's genuinely the most helpful thing you can do. PRs are welcome too, especially for platform installer scripts (the `installer/` directory is currently empty).
+This is a side project I'm actively hacking on. If you run into a site where detection doesn't work, open an issue with the URL — that's genuinely the most helpful thing you can do. PRs are welcome, especially for additional platform release targets.
 
 ### License
 

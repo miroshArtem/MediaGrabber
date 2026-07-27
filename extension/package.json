@@ -7,16 +7,12 @@
     "build": "tsc -p tsconfig.json && npm run bundle",
     "bundle": "esbuild src/background.ts --bundle --outfile=dist/background.js --platform=browser & esbuild src/content.ts --bundle --outfile=dist/content.js --platform=browser & esbuild src/mse-inject.ts --bundle --outfile=dist/mse-inject.js --platform=browser --format=iife & esbuild src/popup/popup.ts --bundle --outfile=dist/popup.js --platform=browser & esbuild src/popup/settings.ts --bundle --outfile=dist/settings.js --platform=browser",
     "clean": "powershell Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue",
-    "package": "cd dist & powershell Compress-Archive -Path * -DestinationPath ../MediaGrabber.zip -Force"
+    "package": "node scripts/package-extension.mjs"
   },
   "devDependencies": {
     "typescript": "^6.0.2",
     "esbuild": "^0.28.0",
     "@types/node": "^22.0.0",
     "@types/chrome": "^0.0.260"
-  },
-  "dependencies": {
-    "m3u8-parser": "^7.2.0",
-    "mpd-parser": "^1.3.1"
   }
 }

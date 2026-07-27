@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build extension and CoApp
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $env:MEDIA_GRABBER_VERSION = $version
+          npm run build
+          npm run package:extension
+
+      - name: Prepare pinned runtime binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          New-Item -ItemType Directory -Force release-runtime | Out-Null
+
+          $ffmpegArchive = Join-Path $env:TEMP 'ffmpeg-8.0.1-essentials_build.zip'
+          Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-8.0.1-essentials_build.zip' -OutFile $ffmpegArchive
+          Expand-Archive -Path $ffmpegArchive -DestinationPath (Join-Path $env:TEMP 'mediagrabber-ffmpeg') -Force
+          $ffmpegRoot = Get-ChildItem (Join-Path $env:TEMP 'mediagrabber-ffmpeg') -Directory | Select-Object -First 1
+          Copy-Item (Join-Path $ffmpegRoot.FullName 'bin/ffmpeg.exe') 'release-runtime/ffmpeg.exe'
+          Copy-Item (Join-Path $ffmpegRoot.FullName 'bin/ffprobe.exe') 'release-runtime/ffprobe.exe'
+
+          Invoke-WebRequest -Uri 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp.exe' -OutFile 'release-runtime/yt-dlp.exe'
+
+          Move-Item 'release-runtime/ffmpeg.exe' 'release/ffmpeg-win-x64.exe'
+          Move-Item 'release-runtime/ffprobe.exe' 'release/ffprobe-win-x64.exe'
+          Move-Item 'release-runtime/yt-dlp.exe' 'release/yt-dlp-win-x64.exe'
+
+      - name: Build standalone CoApp and installer
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $extensionId = node extension/scripts/get-extension-id.mjs extension/manifest.json
+          node coapp/scripts/create-release-config.mjs release-config.json $env:GITHUB_REPOSITORY $tag $extensionId release/ffmpeg-win-x64.exe release/ffprobe-win-x64.exe release/yt-dlp-win-x64.exe
+
+          npm --workspace coapp run bundle
+          npm --workspace coapp run bundle:installer
+          node coapp/scripts/build-sea.mjs coapp/dist/main.bundle.cjs release/MediaGrabber-CoApp-win-x64
+          node coapp/scripts/build-sea.mjs coapp/dist/installer.bundle.cjs release/MediaGrabber-Setup-win-x64 --asset=release-config.json=release-config.json --gzip-asset=coapp.bin.gz=release/MediaGrabber-CoApp-win-x64.exe
+
+          Copy-Item 'extension/MediaGrabber-extension.zip' 'release/MediaGrabber-extension.zip'
+          Copy-Item 'THIRD_PARTY_NOTICES.md' 'release/THIRD_PARTY_NOTICES.txt'
+          node coapp/scripts/create-checksums.mjs release SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem release -File | ForEach-Object { $_.FullName }
+          gh release create $env:GITHUB_REF_NAME $assets --title "MediaGrabber $env:GITHUB_REF_NAME" --generate-notes

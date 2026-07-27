@@ -8,7 +8,7 @@ npm workspaces: `extension/` and `coapp/` are independent packages. Root `packag
 
 | Dir | Package | Output | Notes |
 |-----|---------|--------|-------|
-| `extension/` | `mediagrabber-extension` | `dist/` | Manifest V3 service worker. Entry: `dist/background.js`. Bundles with esbuild (separate from `tsc` build). |
+| `extension/` | `mediagrabber-extension` | `dist/` | Manifest V3 service worker. Entry: `dist/background.js`. Build runs TypeScript plus esbuild bundling. |
 | `coapp/` | `mediagrabber-coapp` | `dist/` | Native messaging host (stdio). Entry: `dist/main.js`. CommonJS. |
 | `docs/` | — | — | VDH research / reference docs, not implementation. |
 | `agent-plan/` | — | — | Project plan: epics (9), tasks (41). See below. |
@@ -24,7 +24,7 @@ npm run build
 npm run build:extension   # or: cd extension && npm run build
 npm run build:coapp      # or: cd coapp && npm run build
 
-# Package extension for Chrome Web Store (creates MediaGrabber.zip)
+# Package extension ZIP for GitHub sideloading
 npm run package:extension   # or: cd extension && npm run package
 
 # Dev / watch
@@ -36,8 +36,8 @@ npm run dev:coapp           # coapp tsc --watch (works)
 cd coapp && npm start        # node dist/main.js
 
 # Native messaging host registration (Windows/macOS/Linux)
-cd coapp && node dist/native-autoinstall.js register [extension-id...]
-cd coapp && node dist/native-autoinstall.js unregister
+cd coapp && node dist/native-autoinstall-cli.js register [extension-id...]
+cd coapp && node dist/native-autoinstall-cli.js unregister
 ```
 
 **Loading the extension:** `chrome://extensions/` → Developer mode → Load unpacked → select the **`extension/` folder** (not `extension/dist/`). The `manifest.json` lives at `extension/manifest.json`; all its paths (service worker, content scripts, popup, icons) are relative to that folder.
@@ -58,7 +58,7 @@ The `manifest.json` does NOT use `"type": "module"` — it relies on the bundled
 
 ## Verification
 
-There are **no tests, lint, typecheck, or CI** configured. The only verification is a successful `tsc` build (`npm run build`). If asked to run tests or lint, they don't exist yet.
+There are **no tests or lint** configured. The local verification is a successful full build (`npm run build`). GitHub Actions builds a Windows release when a `v*` tag is pushed.
 
 ## TypeScript Config Quirks
 
@@ -91,9 +91,15 @@ Not bundled in the repo (gitignored). The CoApp looks for it at:
 
 Place the binary manually before downloads will work. `ffprobe` is expected alongside `ffmpeg`.
 
-## got (HTTP client)
+## CoApp Runtime Paths
 
-`coapp/src/downloads.ts` uses `got` v12+ which is **ESM-only**, but the CoApp is CommonJS. A `new Function('specifier', 'return import(specifier)')` wrapper prevents TypeScript from rewriting `import()` into `require()` (which would throw `ERR_REQUIRE_ESM`). Do not remove this wrapper.
+`coapp/src/paths.ts` centralizes user-local installation paths and runtime binary lookup. Release installs use `%LOCALAPPDATA%/MediaGrabber` on Windows, `~/Library/Application Support/MediaGrabber` on macOS, and `~/.local/share/MediaGrabber` on Linux. Development still resolves binaries from the CoApp project directory.
+
+The CoApp download manager uses Node's built-in HTTP/HTTPS streams so the standalone SEA bundle has no ESM-only HTTP dependency.
+
+## Standalone Release Builds
+
+`coapp/scripts/build-sea.mjs` builds Node.js single-executable applications from the esbuild bundles. The installer can embed `release-config.json` and a gzip-compressed CoApp asset; direct embedding of an already-injected SEA binary is unsafe because it duplicates Node's SEA sentinel.
 
 ## Popup Architecture
 
@@ -142,7 +148,7 @@ Tasks are `.md` files in `agent-plan/tasks/{EP-XX-epic-name}/T-NN-name.md`. Epic
 
 | Decision | Value |
 |----------|-------|
-| Manifest V3 | Mandatory for Chrome Web Store |
+| Manifest V3 | Required by the extension runtime |
 | Background | Service Worker (not persistent page) |
 | Native Messaging | 4-byte length prefix + JSON (weh#rpc) |
 | FFmpeg | Bundled with CoApp (not in repo) |

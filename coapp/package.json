@@ -6,16 +6,19 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
+    "bundle": "esbuild src/main.ts --bundle --platform=node --format=cjs --outfile=dist/main.bundle.cjs",
+    "bundle:installer": "esbuild src/installer.ts --bundle --platform=node --format=cjs --outfile=dist/installer.bundle.cjs",
+    "build:sea": "node scripts/build-sea.mjs",
     "start": "node dist/main.js",
+    "setup": "node dist/installer.js",
+    "register": "node dist/native-autoinstall-cli.js register",
+    "unregister": "node dist/native-autoinstall-cli.js unregister",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
-    "typescript": "^6.0.2"
-  },
-  "dependencies": {
-    "got": "^12.6.0",
-    "tmp": "^0.2.0",
-    "yargs": "^18.0.0"
+    "typescript": "^6.0.2",
+    "esbuild": "^0.28.0",
+    "postject": "^1.0.0-alpha.6"
   }
 }

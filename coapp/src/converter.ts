@@ -5,6 +5,7 @@ import { spawn as nodeSpawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import rpc from './rpc';
+import { getRuntimeBinary, getRuntimeRoots } from './paths';
 
 const convertChildren = new Map<number, ChildProcess>();
 const to_kill = new Set<ChildProcess>();
@@ -19,10 +20,9 @@ function spawn(arg0: string, argv: string[]): ChildProcess {
 }
 
 function findFFmpeg(): string {
-  const platform = process.platform;
   const paths = [
-    path.join(__dirname, '..', 'ffmpeg', platform === 'win32' ? 'win' : platform, 'ffmpeg' + (platform === 'win32' ? '.exe' : '')),
-    path.join(process.cwd(), 'ffmpeg', 'ffmpeg' + (platform === 'win32' ? '.exe' : '')),
+    ...getRuntimeRoots().map(root => path.join(root, getRuntimeBinary('ffmpeg'))),
+    path.join(process.cwd(), 'ffmpeg', 'ffmpeg' + (process.platform === 'win32' ? '.exe' : '')),
     'ffmpeg'
   ];
   for (const p of paths) {
@@ -32,10 +32,9 @@ function findFFmpeg(): string {
 }
 
 function findFFprobe(): string {
-  const platform = process.platform;
   const paths = [
-    path.join(__dirname, '..', 'ffmpeg', platform === 'win32' ? 'win' : platform, 'ffprobe' + (platform === 'win32' ? '.exe' : '')),
-    path.join(process.cwd(), 'ffmpeg', 'ffprobe' + (platform === 'win32' ? '.exe' : '')),
+    ...getRuntimeRoots().map(root => path.join(root, getRuntimeBinary('ffprobe'))),
+    path.join(process.cwd(), 'ffmpeg', 'ffprobe' + (process.platform === 'win32' ? '.exe' : '')),
     'ffprobe'
   ];
   for (const p of paths) {

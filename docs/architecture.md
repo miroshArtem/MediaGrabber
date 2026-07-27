@@ -132,7 +132,7 @@ vdhcoapp/
 │       ├── file.js           # File system operations
 │       ├── weh-rpc.js        # RPC protocol implementation
 │       ├── request.js        # HTTP requests
-│       ├── native-autoinstall.js  # Browser registration
+│       ├── native-autoinstall.ts  # Browser registration
 │       ├── vm.js             # Sandboxed JS VM
 │       └── logger.js         # Logging utilities
 ├── config.toml               # Platform configuration
