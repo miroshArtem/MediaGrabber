@@ -17,7 +17,7 @@ npm workspaces: `extension/` and `coapp/` are independent packages. Root `packag
 ## Commands
 
 ```bash
-# Build everything (runs tsc in each workspace)
+# Build everything (runs tsc + esbuild bundle in extension, tsc in coapp)
 npm run build
 
 # Build a single package
@@ -30,24 +30,31 @@ npm run package:extension   # or: cd extension && npm run package
 # Dev / watch
 npm run dev:coapp           # coapp tsc --watch (works)
 # NOTE: npm run dev:extension is BROKEN — extension has no "watch" script.
-#       Use `cd extension && npm run build` after changes, or add a watch script.
-# IMPORTANT: after `npm run build`, run `cd extension && npm run bundle` (esbuild).
-#           tsc outputs ES modules with bare imports (no .js extensions) that Chrome
-#           service worker cannot resolve. esbuild bundles into a single IIFE file.
-#           The manifest does NOT use "type": "module" — it relies on the bundled output.
+#       Re-run `npm run build` after changes.
 
 # Run CoApp
 cd coapp && npm start        # node dist/main.js
-
-# Extension bundling (esbuild, separate from tsc build)
-cd extension && npm run bundle   # produces dist/background.js, content.js, mse-inject.js, popup.js, settings.js
 
 # Native messaging host registration (Windows/macOS/Linux)
 cd coapp && node dist/native-autoinstall.js register [extension-id...]
 cd coapp && node dist/native-autoinstall.js unregister
 ```
 
-Load unpacked extension: `chrome://extensions/` → Developer mode → Load unpacked → select `extension/dist/`.
+**Loading the extension:** `chrome://extensions/` → Developer mode → Load unpacked → select the **`extension/` folder** (not `extension/dist/`). The `manifest.json` lives at `extension/manifest.json`; all its paths (service worker, content scripts, popup, icons) are relative to that folder.
+
+### Build Chain Detail
+
+`npm run build` for the extension runs `tsc && npm run bundle`. `tsc` compiles `src/` → `dist/` as ES modules with bare imports. `bundle` runs esbuild to produce self-contained IIFE files that Chrome's service worker can execute:
+
+| Source | Bundle output | Format |
+|--------|--------------|--------|
+| `src/background.ts` | `dist/background.js` | default (IIFE) |
+| `src/content.ts` | `dist/content.js` | default (IIFE) |
+| `src/mse-inject.ts` | `dist/mse-inject.js` | `--format=iife` (MAIN world) |
+| `src/popup/popup.ts` | `dist/popup.js` | default (IIFE) |
+| `src/popup/settings.ts` | `dist/settings.js` | default (IIFE) |
+
+The `manifest.json` does NOT use `"type": "module"` — it relies on the bundled output. Running `tsc` alone will produce a `dist/` that Chrome cannot load.
 
 ## Verification
 
@@ -87,6 +94,12 @@ Place the binary manually before downloads will work. `ffprobe` is expected alon
 ## got (HTTP client)
 
 `coapp/src/downloads.ts` uses `got` v12+ which is **ESM-only**, but the CoApp is CommonJS. A `new Function('specifier', 'return import(specifier)')` wrapper prevents TypeScript from rewriting `import()` into `require()` (which would throw `ERR_REQUIRE_ESM`). Do not remove this wrapper.
+
+## Popup Architecture
+
+The `default_popup` and `options_ui.page` in `manifest.json` point to `src/popup/popup.html` and `src/popup/settings.html` — these are **uncompiled HTML files** in the source tree. They reference bundled JS via relative paths: `<script src="../../dist/popup.js">` and `<script src="../../dist/settings.js">`.
+
+**CSS sizing:** Chrome action popups must use fixed pixel dimensions. Viewport-relative values (`100vw`, `100vh`, `min()`) will collapse the popup to ~1px wide. Use explicit `width`, `min-height`, and `max-height` in px.
 
 ## Content Scripts & MSE Hooking
 
