@@ -1,5 +1,4 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$ExtensionId
 )
 
@@ -8,6 +7,18 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $coappRoot = Join-Path $projectRoot 'coapp'
 $distMain = Join-Path $coappRoot 'dist\main.js'
+$manifestFile = Join-Path $projectRoot 'extension\manifest.json'
+
+$derivedExtensionId = (& node (Join-Path $projectRoot 'extension\scripts\get-extension-id.mjs') $manifestFile).Trim()
+if ($LASTEXITCODE -ne 0 -or $derivedExtensionId -notmatch '^[a-p]{32}$') {
+    throw "Could not derive a valid extension ID from $manifestFile"
+}
+
+if ([string]::IsNullOrWhiteSpace($ExtensionId)) {
+    $ExtensionId = $derivedExtensionId
+} elseif ($ExtensionId -ne $derivedExtensionId) {
+    throw "Extension ID '$ExtensionId' does not match the ID derived from $manifestFile ('$derivedExtensionId')"
+}
 
 if (-not (Test-Path $distMain)) {
     throw "CoApp build not found: $distMain"
