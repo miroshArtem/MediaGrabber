@@ -109,6 +109,22 @@ class MediaDetector {
           this.sendMSEToBackground();
           break;
 
+        case 'media-url-map':
+          if (typeof msg.originalUrl === 'string' && typeof msg.relayUrl === 'string') {
+            try {
+              chrome.runtime.sendMessage({
+                type: 'MEDIA_URL_MAP',
+                originalUrl: msg.originalUrl,
+                relayUrl: msg.relayUrl,
+                pageUrl: this.pageUrl,
+                generation: this.pageGeneration
+              }, () => { void chrome.runtime.lastError; });
+            } catch {
+              // Extension context invalidated
+            }
+          }
+          break;
+
         case 'progress':
           this.mseState.totalBytes = msg.totalBytes;
           break;

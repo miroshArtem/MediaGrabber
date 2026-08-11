@@ -15,7 +15,7 @@ rpc.listen({
   ping: (arg: any) => arg,
 
   info: () => ({
-    version: '1.1.0',
+    version: '1.1.1',
     platform: process.platform,
     arch: process.arch,
     home: os.homedir() || process.env.HOME || process.env.USERPROFILE || '',

@@ -84,6 +84,112 @@
     return false;
   }
 
+  function isLikelyMediaRequest(url: string): boolean {
+    try {
+      const path = new URL(url, window.location.href).pathname.toLowerCase();
+      return /\.(m3u8|mpd|ts|m4s|mp4|webm)$/.test(path);
+    } catch {
+      return false;
+    }
+  }
+
+  function findRelayUrl(originalUrl: string, startTime: number, responseUrl?: string): string | undefined {
+    try {
+      const original = new URL(originalUrl, window.location.href);
+      if (responseUrl) {
+        const response = new URL(responseUrl, window.location.href);
+        if (response.href !== original.href && response.origin === original.origin && response.pathname !== original.pathname) {
+          return response.href;
+        }
+      }
+
+      const now = performance.now();
+      const entry = performance.getEntriesByType('resource')
+        .filter((item): item is PerformanceResourceTiming => {
+          if (item.startTime < startTime - 50 || item.startTime > now + 50) return false;
+          try {
+            const resource = new URL(item.name, window.location.href);
+            return resource.origin === original.origin && resource.pathname !== original.pathname;
+          } catch {
+            return false;
+          }
+        })
+        .sort((a, b) => Math.abs(a.startTime - startTime) - Math.abs(b.startTime - startTime))[0];
+
+      return entry?.name;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function reportMediaUrlMapping(originalUrl: string, startTime: number, responseUrl?: string, generation = pageGeneration): void {
+    if (generation !== pageGeneration || !isLikelyMediaRequest(originalUrl)) return;
+    const relayUrl = findRelayUrl(originalUrl, startTime, responseUrl);
+    if (!relayUrl || relayUrl === originalUrl) return;
+    postToContentScript({ type: 'media-url-map', originalUrl, relayUrl }, generation);
+  }
+
+  function wrapXhrInstance(xhr: any): void {
+    if (!xhr || xhr.__MediaGrabberRelayWrapped || typeof xhr.open !== 'function') return;
+    xhr.__MediaGrabberRelayWrapped = true;
+    let report = () => {};
+    for (const property of ['onload', 'onreadystatechange', 'onloadend']) {
+      try {
+        let handler: any;
+        Object.defineProperty(xhr, property, {
+          configurable: true,
+          get: () => handler,
+          set: (value: any) => {
+            handler = typeof value === 'function'
+              ? function(this: any, event: any): any {
+                report();
+                return value.call(this, event);
+              }
+              : value;
+          }
+        });
+      } catch {}
+    }
+    const originalOpen = xhr.open;
+    xhr.open = function(method: string, url: string, ...args: any[]): any {
+      const originalUrl = String(url || '');
+      const generation = pageGeneration;
+      const startTime = performance.now();
+      report = () => reportMediaUrlMapping(originalUrl, startTime, xhr.responseURL, generation);
+      try {
+        xhr.addEventListener('loadend', report, { once: true });
+      } catch {}
+      return originalOpen.call(this, method, url, ...args);
+    };
+  }
+
+  function wrapXhrConstructor(value: any): any {
+    if (!value || value.__MediaGrabberRelayConstructor) return value;
+    const Wrapped = function(this: any, ...args: any[]): any {
+      const xhr = new value(...args);
+      wrapXhrInstance(xhr);
+      return xhr;
+    } as any;
+    Wrapped.prototype = value.prototype;
+    try { Object.setPrototypeOf(Wrapped, value); } catch {}
+    Wrapped.__MediaGrabberRelayConstructor = true;
+    return Wrapped;
+  }
+
+  try {
+    let currentXhr = window.XMLHttpRequest;
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'XMLHttpRequest');
+    Object.defineProperty(window, 'XMLHttpRequest', {
+      configurable: true,
+      enumerable: descriptor?.enumerable ?? true,
+      get: () => currentXhr,
+      set: (value: any) => { currentXhr = wrapXhrConstructor(value); }
+    });
+    currentXhr = wrapXhrConstructor(currentXhr);
+  } catch {
+    // Some page environments expose an immutable XMLHttpRequest property.
+  }
+
   const origCreateObjectURL = URL.createObjectURL;
   URL.createObjectURL = function(obj: any): string {
     const url = origCreateObjectURL.call(this, obj);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MediaGrabber",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA695XfV4G2T6Xf6Q/b42S5JNr8GnXIsecSWDpWICs481UdMQrA2ssDqTb5YILzJCWSLtzUb8uU6CycZ56yp4oqU4lefmG/e0sUvz9PI7NvMbu2F6r3L+XxOBJwyv+JYt8uWS0H9KGDzZVYpNRj0IgtHuMTbRUt7z8pWl+PPDzeFy2Tbfa0sXUCQRmlMeAwEzMmdFTkIDV4eDMlNlJ47GISF2ZC8Ht492dDK5XpmCGqUUQJTpZ3iEMusR5qQcBq7l19ZtKENAby1gxl9PwnFAWuiInO9qnEKC39qQfre0mpeX/NOB3cqdH3RMUc/7z8dskG3ImLnbUr3cncZk0uhQWCQIDAQAB",
   "description": "Download online videos with quality selection",
   "minimum_chrome_version": "102",

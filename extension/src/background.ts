@@ -25,6 +25,17 @@ const ytdlpFormatUrlByTab = new Map<number, string>();
 const pageGenerationByTab = new Map<number, number>();
 const navigationGenerationByTab = new Map<number, number>();
 const currentPageUrlByTab = new Map<number, string | null>();
+const relayMappingsByTab = new Map<number, Map<string, string>>();
+const relayCodecsByTab = new Map<number, Map<string, RelayCodec>>();
+
+interface RelayCodec {
+  hour: number;
+  prefix: string;
+  relayOrigin: string;
+  mapping: Record<string, string>;
+}
+
+const relayAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 function getPageGeneration(tabId: number): number {
   return pageGenerationByTab.get(tabId) || 0;
@@ -36,7 +47,106 @@ function resetTabState(tabId: number): void {
   interceptedMediaByTab.delete(tabId);
   pageMetadataByTab.delete(tabId);
   ytdlpFormatUrlByTab.delete(tabId);
+  relayMappingsByTab.delete(tabId);
+  relayCodecsByTab.delete(tabId);
   chrome.action.setBadgeText({ tabId, text: '' }, () => { void chrome.runtime.lastError; });
+}
+
+function learnRelayCodec(tabId: number, originalUrl: string, relayUrl: string): void {
+  let original: URL;
+  let relay: URL;
+  try {
+    original = new URL(originalUrl);
+    relay = new URL(relayUrl);
+  } catch {
+    return;
+  }
+  if (!/^https?:$/.test(original.protocol) || !/^https?:$/.test(relay.protocol)) return;
+
+  const separator = relay.pathname.lastIndexOf('/');
+  const token = separator >= 0 ? relay.pathname.slice(separator + 1) : '';
+  if (!token) return;
+
+  const candidateHours = new Set<number>();
+  const currentHour = Math.round(Date.now() / 1000 / 60 / 60);
+  for (let offset = -48; offset <= 48; offset += 1) candidateHours.add(currentHour + offset);
+  const queryTime = Number(original.searchParams.get('t'));
+  if (Number.isFinite(queryTime) && queryTime > 0) {
+    const queryHour = Math.round(queryTime / 1000 / 60 / 60);
+    for (let offset = -2; offset <= 2; offset += 1) candidateHours.add(queryHour + offset);
+  }
+
+  let best: { hour: number; mapping: Record<string, string>; mapped: number } | undefined;
+  for (const hour of candidateHours) {
+    let encoded: string;
+    try {
+      encoded = btoa(`${hour}/${original.pathname}${original.search}`);
+    } catch {
+      continue;
+    }
+    if (encoded.length !== token.length) continue;
+
+    const mapping: Record<string, string> = {};
+    let valid = true;
+    for (let i = 0; i < encoded.length; i += 1) {
+      const source = encoded[i];
+      const target = token[i];
+      if (relayAlphabet.includes(source)) {
+        if (mapping[source] && mapping[source] !== target) {
+          valid = false;
+          break;
+        }
+        mapping[source] = target;
+      } else if (source !== target) {
+        valid = false;
+        break;
+      }
+    }
+    if (valid && (!best || Object.keys(mapping).length > best.mapped)) {
+      best = { hour, mapping, mapped: Object.keys(mapping).length };
+    }
+  }
+  if (!best) return;
+
+  const mappings = relayMappingsByTab.get(tabId) || new Map<string, string>();
+  mappings.set(original.href, relay.href);
+  relayMappingsByTab.set(tabId, mappings);
+
+  const codecs = relayCodecsByTab.get(tabId) || new Map<string, RelayCodec>();
+  const existing = codecs.get(original.origin);
+  if (existing && (existing.hour !== best.hour || existing.prefix !== relay.pathname.slice(0, separator + 1))) return;
+
+  const mapping = existing?.mapping || {};
+  for (const [source, target] of Object.entries(best.mapping)) {
+    if (!mapping[source]) mapping[source] = target;
+  }
+  codecs.set(original.origin, {
+    hour: best.hour,
+    prefix: relay.pathname.slice(0, separator + 1),
+    relayOrigin: relay.origin,
+    mapping
+  });
+  relayCodecsByTab.set(tabId, codecs);
+}
+
+function getRelayUrl(tabId: number, originalUrl: string): string | undefined {
+  const mappings = relayMappingsByTab.get(tabId);
+  if (mappings?.has(originalUrl)) return mappings.get(originalUrl);
+
+  let original: URL;
+  try { original = new URL(originalUrl); } catch { return undefined; }
+  const codec = relayCodecsByTab.get(tabId)?.get(original.origin);
+  if (!codec) return undefined;
+
+  let encoded: string;
+  try {
+    encoded = btoa(`${codec.hour}/${original.pathname}${original.search}`);
+  } catch {
+    return undefined;
+  }
+  if ([...encoded].some((char) => relayAlphabet.includes(char) && !codec.mapping[char])) return undefined;
+  const token = [...encoded].map((char) => relayAlphabet.includes(char) ? codec.mapping[char] : char).join('');
+  return `${codec.relayOrigin}${codec.prefix}${token}`;
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -231,6 +341,15 @@ function getRequestReferer(initiator?: string): string | undefined {
     return `${url.origin}/`;
   } catch {
     return undefined;
+  }
+}
+
+function getFfmpegHttpArgs(referer?: string): string[] {
+  if (!referer) return [];
+  try {
+    return ['-referer', referer, '-headers', `Origin: ${new URL(referer).origin}\r\n`];
+  } catch {
+    return ['-referer', referer];
   }
 }
 
@@ -459,9 +578,9 @@ async function handleInterceptedMedia(
               kind: 'video' as const,
               language: audio.language,
               formatArgs: [
-                ...(referer ? ['-referer', referer] : []),
+                ...getFfmpegHttpArgs(referer),
                 '-i', variant.url,
-                ...(referer ? ['-referer', referer] : []),
+                ...getFfmpegHttpArgs(referer),
                 '-i', audio.uri!,
                 '-map', '0:v:0',
                 '-map', '1:a:0',
@@ -697,6 +816,79 @@ function getDefaultExtension(video: VideoInfo, type: VideoInfo['type']): string 
   return 'mp4';
 }
 
+function formatFfmpegError(exitCode: number | null, stderr: string): string {
+  const details = stderr.trim();
+  if (/HTTP error (401|403|410)|Server returned 4XX/i.test(details)) {
+    return 'Ссылка на поток недоступна или устарела. Запустите плеер заново и повторите загрузку.';
+  }
+  if (/Invalid data found|Error opening input/i.test(details)) {
+    return 'FFmpeg не смог открыть поток. Запустите плеер на несколько секунд и повторите загрузку.';
+  }
+  return `FFmpeg exit code ${exitCode}: ${details.slice(-1000)}`;
+}
+
+interface ManifestFile {
+  placeholder: string;
+  content: string;
+}
+
+async function rewriteHlsInput(tabId: number, inputUrl: string, referer: string | undefined, manifestFiles: ManifestFile[]): Promise<string> {
+  let origin: string;
+  try { origin = new URL(inputUrl).origin; } catch { return inputUrl; }
+  if (!relayCodecsByTab.get(tabId)?.has(origin)) return inputUrl;
+
+  const parsed = await M3U8ParserWrapper.fetchAndParse(inputUrl, referer);
+  if (parsed.type !== 'media' || !parsed.manifest) return inputUrl;
+
+  const manifestUrl = parsed.manifestUrl || inputUrl;
+  let rewrittenCount = 0;
+  let unresolvedUri = false;
+  const rewriteUri = (value: string): string => {
+    const absolute = M3U8ParserWrapper.resolveUrl(value, manifestUrl);
+    const relayUrl = getRelayUrl(tabId, absolute);
+    if (!relayUrl) {
+      unresolvedUri = true;
+      return value;
+    }
+    rewrittenCount += 1;
+    return relayUrl;
+  };
+
+  const lines = parsed.manifest.split(/\r?\n/).map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+    if (trimmed.startsWith('#')) {
+      return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => `URI="${rewriteUri(uri)}"`);
+    }
+    return line.replace(trimmed, rewriteUri(trimmed));
+  });
+
+  if (rewrittenCount === 0 || unresolvedUri) {
+    throw new Error('Browser relay mapping is incomplete. Start playback for a few seconds and retry the download.');
+  }
+  const placeholder = `__MEDIA_GRABBER_HLS_MANIFEST_${manifestFiles.length}__`;
+  manifestFiles.push({ placeholder, content: lines.join('\n') });
+  return placeholder;
+}
+
+async function prepareHlsArguments(tabId: number, args: string[], referer?: string): Promise<{ args: string[]; manifestFiles: ManifestFile[] }> {
+  const prepared = [...args];
+  const manifestFiles: ManifestFile[] = [];
+  for (let i = 0; i < prepared.length - 1; i += 1) {
+    if (prepared[i] !== '-i' || !/^https?:\/\//i.test(prepared[i + 1])) continue;
+    const originalInput = prepared[i + 1];
+    const rewrittenInput = await rewriteHlsInput(tabId, originalInput, referer, manifestFiles);
+    prepared[i + 1] = rewrittenInput;
+    if (rewrittenInput !== originalInput) {
+      prepared.splice(i, 0,
+        '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,data',
+        '-extension_picky', '0'
+      );
+    }
+  }
+  return { args: prepared, manifestFiles };
+}
+
 function joinOutputPath(directory: string, filename: string): string {
   if (!directory) return filename;
   const separator = coappPlatform === 'win32' ? '\\' : '/';
@@ -721,6 +913,14 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
     const downloadKey = `convert_${Date.now()}`;
     const outputPath = joinOutputPath(directory, outFilename);
 
+    const inputArgs = [...getFfmpegHttpArgs(video.referer), '-i', video.url];
+    const baseArgs = formatArgs && formatArgs.length > 0
+      ? [...formatArgs, '-y', outputPath]
+      : [...inputArgs, ...codecArg, '-y', outputPath];
+    const prepared = type === 'hls'
+      ? await prepareHlsArguments(tabId ?? -1, baseArgs, video.referer)
+      : { args: baseArgs, manifestFiles: [] };
+
     activeDownloads.set(downloadKey, {
       type: 'convert',
       video,
@@ -729,17 +929,10 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
       tabId
     });
 
-    const inputArgs = video.referer
-      ? ['-referer', video.referer, '-i', video.url]
-      : ['-i', video.url];
-    const ffmpegArgs = formatArgs && formatArgs.length > 0
-      ? [...formatArgs, '-y', outputPath]
-      : [...inputArgs, ...codecArg, '-y', outputPath];
-
     // Start ffmpeg asynchronously — progress comes via convertOutput push
     nativeClient.convert(
-      ffmpegArgs,
-      { progressTime: 1000, startHandler: downloadKey }
+      prepared.args,
+      { progressTime: 1000, startHandler: downloadKey, manifestFiles: prepared.manifestFiles }
     ).then(result => {
       if (result.exitCode === 0) {
         notify('Download complete', outFilename);
@@ -749,7 +942,7 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
       } else {
         notify('Download failed', outFilename);
         popupPorts.forEach(port => {
-          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: `FFmpeg exit code ${result.exitCode}: ${result.stderr}` });
+          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: formatFfmpegError(result.exitCode, result.stderr) });
         });
       }
       activeDownloads.delete(downloadKey);
@@ -792,7 +985,7 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
       } else {
         notify('Download failed', outFilename);
         popupPorts.forEach(port => {
-          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: `FFmpeg exit code ${result.exitCode}: ${result.stderr}` });
+          port.postMessage({ type: 'DOWNLOAD_ERROR', downloadId: downloadKey, error: formatFfmpegError(result.exitCode, result.stderr) });
         });
       }
       activeDownloads.delete(downloadKey);
@@ -941,6 +1134,9 @@ async function handleMessage(message: any, sender: chrome.runtime.MessageSender)
     case 'VIDEO_DETECTED':
       return handleVideoDetected(sender.tab?.id, message.video, sender.frameId, sender.url, sender.tab?.url);
 
+    case 'MEDIA_URL_MAP':
+      return handleMediaUrlMap(sender.tab?.id, message, sender.frameId, sender.url, sender.tab?.url);
+
     case 'PAGE_METADATA':
       return handlePageMetadata(sender.tab?.id, message.metadata, sender.frameId, sender.url, sender.tab?.url);
 
@@ -1010,6 +1206,26 @@ function handleVideoDetected(tabId: number | undefined, video: VideoInfo, frameI
   upsertVideo(tabId, video);
   console.log(`[MediaGrabber] Detected video on tab ${tabId}:`, video.title);
   return { success: true, count: (mediaByTab.get(tabId) || []).length };
+}
+
+function handleMediaUrlMap(tabId: number | undefined, mapping: any, frameId?: number, frameUrl?: string, senderTabUrl?: string): any {
+  if (tabId === undefined) return { error: 'No tabId' };
+  const currentUrl = currentTopPageUrl(tabId, senderTabUrl);
+  if (!mapping.pageUrl || !frameUrl || mapping.pageUrl !== frameUrl || !currentUrl) {
+    return { success: true, stale: true };
+  }
+  if (frameId === 0 && mapping.pageUrl !== currentUrl) {
+    return { success: true, stale: true };
+  }
+  if (!isCurrentContentGeneration(tabId, mapping.generation, frameId === 0)) {
+    return { success: true, stale: true };
+  }
+  if (typeof mapping.originalUrl !== 'string' || typeof mapping.relayUrl !== 'string') {
+    return { success: true };
+  }
+
+  learnRelayCodec(tabId, mapping.originalUrl, mapping.relayUrl);
+  return { success: true };
 }
 
 function handlePageNavigation(tabId: number | undefined, pageUrl: string, generation: number, frameId?: number, frameUrl?: string, senderTabUrl?: string): any {

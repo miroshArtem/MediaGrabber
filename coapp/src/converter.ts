@@ -2,6 +2,7 @@
 // Registers: convert, abortConvert, probe, info
 
 import { spawn as nodeSpawn, ChildProcess } from 'child_process';
+import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import rpc from './rpc';
@@ -70,7 +71,21 @@ rpc.listen({
 
   convert: async (args: string[] = ['-h'], options: any = {}) => {
     const ffmpegBaseArgs = '-progress pipe:1 -hide_banner -loglevel error'.split(' ');
-    const fullArgs = [...ffmpegBaseArgs, ...args];
+    let manifestDir: string | undefined;
+    let resolvedArgs = args;
+    const manifestFiles = Array.isArray(options.manifestFiles) ? options.manifestFiles : [];
+    if (manifestFiles.length > 0) {
+      manifestDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mediagrabber-hls-'));
+      const replacements = new Map<string, string>();
+      for (let i = 0; i < manifestFiles.length; i += 1) {
+        const filePath = path.join(manifestDir, `manifest-${i}.m3u8`);
+        await fs.promises.writeFile(filePath, String(manifestFiles[i]?.content || ''), 'utf8');
+        replacements.set(String(manifestFiles[i]?.placeholder || ''), filePath);
+      }
+      resolvedArgs = args.map((arg) => replacements.get(arg) || arg);
+    }
+
+    const fullArgs = [...ffmpegBaseArgs, ...resolvedArgs];
     const child = spawn(ffmpegBin, fullArgs);
     if (child.pid) convertChildren.set(child.pid, child);
 
@@ -113,8 +128,9 @@ rpc.listen({
     }
 
     return new Promise((resolve) => {
-      child.on('exit', (code) => {
+      child.on('exit', async (code) => {
         if (child.pid) convertChildren.delete(child.pid);
+        if (manifestDir) await fs.promises.rm(manifestDir, { recursive: true, force: true });
         resolve({ exitCode: code, pid: child.pid, stderr });
       });
     });

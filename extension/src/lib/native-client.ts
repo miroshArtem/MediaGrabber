@@ -204,7 +204,11 @@ export class NativeClient {
 
   async info(): Promise<any> { return this.call('info'); }
 
-  async convert(args: string[], options?: { progressTime?: number; startHandler?: any }): Promise<{ exitCode: number; pid: number; stderr: string }> {
+  async convert(args: string[], options?: {
+    progressTime?: number;
+    startHandler?: any;
+    manifestFiles?: Array<{ placeholder: string; content: string }>;
+  }): Promise<{ exitCode: number; pid: number; stderr: string }> {
     return this.call('convert', args, options || {});
   }
 

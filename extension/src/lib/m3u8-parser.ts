@@ -28,6 +28,8 @@ export interface ParsedM3U8 {
   childUrls?: string[];
   segments?: string[];
   duration?: number;
+  manifest?: string;
+  manifestUrl?: string;
 }
 
 export class M3U8ParserWrapper {
@@ -42,7 +44,12 @@ export class M3U8ParserWrapper {
       throw new Error(`HLS manifest request failed with HTTP ${response.status}`);
     }
     const text = await response.text();
-    return M3U8ParserWrapper.parse(text, response.url || url);
+    const manifestUrl = response.url || url;
+    return {
+      ...M3U8ParserWrapper.parse(text, manifestUrl),
+      manifest: text,
+      manifestUrl
+    };
   }
   
   /**
