@@ -28,11 +28,11 @@ Chrome requires Developer mode and Load unpacked for extensions distributed outs
 
 ## Release workflow
 
-Push a tag such as `v1.0.0`. GitHub Actions builds the Windows x64 release without repository secrets:
+Push a tag such as `v1.1.0`. GitHub Actions builds the Windows x64 release without repository secrets:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 The workflow derives the extension ID from the public manifest key and embeds it in the native host configuration.

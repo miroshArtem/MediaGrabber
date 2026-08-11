@@ -25,6 +25,7 @@ interface VideoInfo {
   url: string;
   type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp' | 'mse';
   qualities: VideoQuality[];
+  referer?: string;
   thumbnail?: string;
   duration?: number;
   fileSize?: number;
@@ -37,6 +38,7 @@ interface QualityOption {
   resolution?: string;
   url: string;
   height?: number;
+  width?: number;
   sizeLabel?: string;
   formatArgs?: string[];
   formatId?: string;
@@ -56,6 +58,9 @@ let currentDownloadId: string | null = null;
 
 // Connect to background script
 function initPopup(): void {
+  const version = document.querySelector('.version');
+  if (version) version.textContent = `MediaGrabber v${chrome.runtime.getManifest().version}`;
+
   port = chrome.runtime.connect({ name: 'popup' });
   
   port.onMessage.addListener((msg) => {
@@ -331,6 +336,7 @@ function selectMedia(video: VideoInfo, element: HTMLElement): void {
     resolution: q.width && q.height ? `${q.width}x${q.height}` : undefined,
     url: q.url,
     height: q.height,
+    width: q.width,
     sizeLabel: getSizeLabel(q, video),
     formatArgs: q.formatArgs,
     formatId: q.formatId,
@@ -557,6 +563,7 @@ function startDownload(video: VideoInfo, quality: QualityOption): void {
         url: quality.url,
         qualities: [{
           height: quality.height,
+          width: quality.width,
           bitrate: quality.bandwidth,
           url: quality.url,
           label: quality.label,
@@ -564,7 +571,9 @@ function startDownload(video: VideoInfo, quality: QualityOption): void {
           formatId: quality.formatId,
           ext: quality.ext,
           fps: quality.fps,
-          fileSize: quality.fileSize
+          fileSize: quality.fileSize,
+          kind: quality.kind,
+          language: quality.language
         }]
       },
       filename: filename

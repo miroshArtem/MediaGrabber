@@ -42,6 +42,7 @@ export interface VideoInfo {
   type: 'm3u8' | 'mpd' | 'direct' | 'hls' | 'dash' | 'mp4' | 'webm' | 'ytdlp' | 'mse';
   qualities: VideoQuality[];
   childUrls?: string[];
+  referer?: string;
   thumbnail?: string;
   duration?: number;
   fileSize?: number;

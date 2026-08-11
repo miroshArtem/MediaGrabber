@@ -33,8 +33,11 @@ export class DashParserWrapper {
     const init: RequestInit = {};
     if (referer) init.referrer = referer;
     const response = await fetch(url, init);
+    if (!response.ok) {
+      throw new Error(`DASH manifest request failed with HTTP ${response.status}`);
+    }
     const text = await response.text();
-    return DashParserWrapper.parse(text, url);
+    return DashParserWrapper.parse(text, response.url || url);
   }
 
   static parse(manifest: string, manifestUrl: string): ParsedDash {

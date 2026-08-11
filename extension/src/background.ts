@@ -185,10 +185,54 @@ chrome.webRequest.onBeforeRequest.addListener(
 
     if (!isMediaUrl(parsedUrl)) return;
 
-    void handleInterceptedMedia(details.tabId, details.url);
+    void handleInterceptedMedia(details.tabId, details.url, undefined, getRequestReferer(details.initiator));
   },
   { urls: ['<all_urls>'] }
 );
+
+chrome.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+    if (details.statusCode < 200 || details.statusCode >= 300) return;
+
+    const type = getMediaTypeFromContentType(getContentType(details.responseHeaders));
+    if (type) {
+      void handleInterceptedMedia(details.tabId, details.url, type, getRequestReferer(details.initiator));
+    }
+  },
+  { urls: ['<all_urls>'] },
+  ['responseHeaders']
+);
+
+function getContentType(headers?: chrome.webRequest.HttpHeader[]): string {
+  const header = headers?.find((item) => item.name.toLowerCase() === 'content-type');
+  return (header?.value || '').split(';', 1)[0].trim().toLowerCase();
+}
+
+function getMediaTypeFromContentType(contentType: string): VideoInfo['type'] | undefined {
+  if (
+    contentType === 'application/vnd.apple.mpegurl' ||
+    contentType === 'application/x-mpegurl' ||
+    contentType === 'audio/mpegurl' ||
+    contentType === 'audio/x-mpegurl'
+  ) {
+    return 'hls';
+  }
+
+  if (contentType === 'application/dash+xml') return 'dash';
+  return undefined;
+}
+
+function getRequestReferer(initiator?: string): string | undefined {
+  if (!initiator || initiator === 'null') return undefined;
+  try {
+    const url = new URL(initiator);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+    return `${url.origin}/`;
+  } catch {
+    return undefined;
+  }
+}
 
 function isMediaUrl(url: URL): boolean {
   // Only http(s) — exclude blob:, data:, chrome-extension:, ws:, etc.
@@ -343,7 +387,12 @@ async function getTabTitle(tabId: number): Promise<string> {
   });
 }
 
-async function handleInterceptedMedia(tabId: number, url: string): Promise<void> {
+async function handleInterceptedMedia(
+  tabId: number,
+  url: string,
+  forcedType?: VideoInfo['type'],
+  requestReferer?: string
+): Promise<void> {
   const generation = getPageGeneration(tabId);
   const seen = interceptedMediaByTab.get(tabId) || new Set<string>();
   if (seen.has(url)) return;
@@ -353,8 +402,8 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
   const metadata = pageMetadataByTab.get(tabId);
   const title = metadata?.title || await getTabTitle(tabId);
   if (generation !== getPageGeneration(tabId)) return;
-  const type = getMediaType(url);
-  const referer = metadata?.pageUrl;
+  const type = forcedType || getMediaType(url);
+  const referer = requestReferer || metadata?.pageUrl;
 
   // Deduplicate HLS/DASH manifests from redirect chains (same path, different CDN host)
   if (type === 'hls' || type === 'dash') {
@@ -376,17 +425,56 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
       const parsed = await M3U8ParserWrapper.fetchAndParse(url, referer);
       duration = parsed.duration;
       childUrls = parsed.childUrls;
-      qualities = parsed.variants.map((variant) => ({
-        height: variant.height || 0,
-        width: variant.width,
-        bitrate: variant.bandwidth,
-        url: variant.url,
-        label: variant.name,
-        kind: 'video' as const
-      }));
+
+      const audioRenditions = (parsed.mediaRenditions || [])
+        .filter((r) => r.type.toUpperCase() === 'AUDIO');
+      const activeAudioGroups = new Set(
+        parsed.variants.map((variant) => variant.audioGroupId).filter(Boolean)
+      );
+
+      for (const variant of parsed.variants) {
+        const matchingAudio = audioRenditions
+          .filter((r) => r.groupId === variant.audioGroupId && r.uri)
+          .sort((a, b) => Number(Boolean(b.default)) - Number(Boolean(a.default)) ||
+            Number(Boolean(b.autoselect)) - Number(Boolean(a.autoselect)));
+
+        if (matchingAudio.length === 0) {
+          qualities.push({
+            height: variant.height || 0,
+            width: variant.width,
+            bitrate: variant.bandwidth,
+            url: variant.url,
+            label: variant.name,
+            kind: 'video' as const
+          });
+        } else {
+          for (const audio of matchingAudio) {
+            const audioLabel = audio.name || audio.language || 'Audio';
+            qualities.push({
+              height: variant.height || 0,
+              width: variant.width,
+              bitrate: variant.bandwidth,
+              url: variant.url,
+              label: `${variant.name} - ${audioLabel}`,
+              kind: 'video' as const,
+              language: audio.language,
+              formatArgs: [
+                ...(referer ? ['-referer', referer] : []),
+                '-i', variant.url,
+                ...(referer ? ['-referer', referer] : []),
+                '-i', audio.uri!,
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c', 'copy'
+              ]
+            });
+          }
+        }
+      }
 
       for (const r of parsed.mediaRenditions || []) {
         if (!r.uri || r.type === 'CLOSED-CAPTIONS') continue;
+        if (r.groupId && !activeAudioGroups.has(r.groupId)) continue;
         const kind = r.type === 'AUDIO' ? 'audio' as const : r.type === 'SUBTITLES' ? 'subtitle' as const : undefined;
         if (!kind) continue;
         const labelParts: string[] = [];
@@ -407,7 +495,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
       // Fallback: fetch media playlist for duration if master had none
       if (!duration && parsed.variants.length > 0) {
         try {
-          const mediaPlaylist = await M3U8ParserWrapper.fetchAndParse(parsed.variants[0].url);
+          const mediaPlaylist = await M3U8ParserWrapper.fetchAndParse(parsed.variants[0].url, referer);
           duration = mediaPlaylist.duration;
         } catch {
           // ignore
@@ -415,6 +503,8 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
       }
     } catch (error) {
       console.warn('[MediaGrabber] Failed to parse HLS manifest:', error);
+      seen.delete(url);
+      return;
     }
   }
 
@@ -491,6 +581,7 @@ async function handleInterceptedMedia(tabId: number, url: string): Promise<void>
     type,
     qualities,
     childUrls,
+    referer,
     duration: duration || metadata?.duration,
     thumbnail: metadata?.thumbnail,
     fileSize
@@ -600,6 +691,7 @@ function ensureFilenameExtension(filename: string, extension: string): string {
 
 function getDefaultExtension(video: VideoInfo, type: VideoInfo['type']): string {
   if (video.qualities[0]?.kind === 'subtitle') return video.qualities[0]?.ext || 'vtt';
+  if (video.qualities[0]?.kind === 'audio') return video.qualities[0]?.ext || 'm4a';
   if (type === 'webm') return 'webm';
   if (video.qualities[0]?.ext === 'mp3') return 'mp3';
   return 'mp4';
@@ -614,7 +706,7 @@ function joinOutputPath(directory: string, filename: string): string {
 async function startDownload(video: VideoInfo, filename?: string, tabId?: number): Promise<any> {
   await ensureCoAppConnected();
 
-  const type = getMediaType(video.url);
+  const type = video.type === 'm3u8' ? 'hls' : video.type === 'mpd' ? 'dash' : video.type;
   const outFilename = ensureFilenameExtension(
     sanitizeFilename(filename || `${video.title || 'video'}`),
     getDefaultExtension(video, type)
@@ -625,6 +717,7 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
     // FFmpeg convert path
     const isSubtitle = video.qualities[0]?.kind === 'subtitle';
     const codecArg = isSubtitle ? ['-c:s', 'copy'] : ['-c', 'copy'];
+    const formatArgs = video.qualities[0]?.formatArgs;
     const downloadKey = `convert_${Date.now()}`;
     const outputPath = joinOutputPath(directory, outFilename);
 
@@ -636,9 +729,16 @@ async function startDownload(video: VideoInfo, filename?: string, tabId?: number
       tabId
     });
 
+    const inputArgs = video.referer
+      ? ['-referer', video.referer, '-i', video.url]
+      : ['-i', video.url];
+    const ffmpegArgs = formatArgs && formatArgs.length > 0
+      ? [...formatArgs, '-y', outputPath]
+      : [...inputArgs, ...codecArg, '-y', outputPath];
+
     // Start ffmpeg asynchronously — progress comes via convertOutput push
     nativeClient.convert(
-      ['-i', video.url, ...codecArg, '-y', outputPath],
+      ffmpegArgs,
       { progressTime: 1000, startHandler: downloadKey }
     ).then(result => {
       if (result.exitCode === 0) {

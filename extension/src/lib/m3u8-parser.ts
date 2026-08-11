@@ -8,6 +8,7 @@ export interface M3U8StreamInfo {
   height?: number;
   codecs?: string;
   name?: string;
+  audioGroupId?: string;
 }
 
 export interface MediaRendition {
@@ -37,8 +38,11 @@ export class M3U8ParserWrapper {
     const init: RequestInit = {};
     if (referer) init.referrer = referer;
     const response = await fetch(url, init);
+    if (!response.ok) {
+      throw new Error(`HLS manifest request failed with HTTP ${response.status}`);
+    }
     const text = await response.text();
-    return M3U8ParserWrapper.parse(text, url);
+    return M3U8ParserWrapper.parse(text, response.url || url);
   }
   
   /**
@@ -109,10 +113,37 @@ export class M3U8ParserWrapper {
     
     // Sort variants by bandwidth (highest first)
     variants.sort((a, b) => b.bandwidth - a.bandwidth);
+    const audioGroupMembers = new Map<string, string[]>();
+    for (const rendition of mediaRenditions) {
+      if (rendition.type !== 'AUDIO' || !rendition.groupId) continue;
+      const members = audioGroupMembers.get(rendition.groupId) || [];
+      members.push([
+        rendition.name || '',
+        rendition.language || '',
+        rendition.default ? '1' : '0',
+        rendition.autoselect ? '1' : '0'
+      ].join(':'));
+      audioGroupMembers.set(rendition.groupId, members);
+    }
+    const audioGroupSignatures = new Map<string, string>();
+    for (const [groupId, members] of audioGroupMembers) {
+      audioGroupSignatures.set(groupId, members.sort().join('|'));
+    }
+
+    const seenVariantKeys = new Set<string>();
+    const uniqueVariants = variants.filter((variant) => {
+      const audioGroupKey = variant.audioGroupId
+        ? audioGroupSignatures.get(variant.audioGroupId) || variant.audioGroupId
+        : '';
+      const key = `${variant.width || 0}:${variant.height || 0}:${variant.bandwidth}:${variant.codecs || ''}:${audioGroupKey}`;
+      if (seenVariantKeys.has(key)) return false;
+      seenVariantKeys.add(key);
+      return true;
+    });
     
     return {
       type: isMaster ? 'master' : 'media',
-      variants,
+      variants: uniqueVariants,
       mediaRenditions: mediaRenditions.length > 0 ? mediaRenditions : undefined,
       childUrls: childUrls.length > 0 ? Array.from(new Set(childUrls)) : undefined,
       segments: segments.length > 0 ? segments : undefined,
@@ -143,6 +174,11 @@ export class M3U8ParserWrapper {
     const codecsMatch = line.match(/CODECS="([^"]+)"/);
     if (codecsMatch) {
       info.codecs = codecsMatch[1];
+    }
+
+    const audioGroupMatch = line.match(/AUDIO="([^"]+)"/);
+    if (audioGroupMatch) {
+      info.audioGroupId = audioGroupMatch[1];
     }
     
     info.name = M3U8ParserWrapper.getQualityName(info.height);

@@ -1,6 +1,6 @@
 {
   "name": "mediagrabber-extension",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Browser extension for downloading online videos with quality selection",
   "main": "dist/background.js",
   "scripts": {

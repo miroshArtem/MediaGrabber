@@ -171,7 +171,7 @@ async function uninstall(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const command = process.argv[2] || 'help';
+  const command = process.argv[2] || 'install';
   if (command === 'install') {
     await install();
   } else if (command === 'uninstall') {
